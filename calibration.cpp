@@ -34,7 +34,8 @@ void PrintData (A a, B b)
 
 void Measure(int cycles) 
 {
-  for (int c = 0; c < cycles; c++) {
+  for (int c = 0; c < cycles; c++)
+  {
     for (int i = 0; i < DAC_RES; i++) {
       dac_output_voltage(DAC_CHANNEL_1, i);
       delayMicroseconds(100); // Увеличенное время стабилизации
@@ -69,7 +70,7 @@ void Interpolate() {
 }
 
 void FineInterpolate() {
-  // Высокоточная интерполяция (4096 -> 4096*5 точек)
+  //  
   for (int i = 0; i < ADC_RES-1; i++) {
     float step = (InterpData[i+1] - InterpData[i]) / FINE_STEPS;
     for (int j = 0; j < FINE_STEPS; j++) {
@@ -85,7 +86,8 @@ void BuildLUT() {
     int best_idx = 0;
     
     // Ищем ближайшее значение в FineData
-    for (int j = 0; j < (ADC_RES-1)*FINE_STEPS; j++) {
+    for (int j = 0; j < (ADC_RES-1)*FINE_STEPS; j++)
+    {
       float diff = fabs(i - FineData[j]);
       if (diff < min_diff) {
         min_diff = diff;
@@ -97,15 +99,13 @@ void BuildLUT() {
 }
 
 void setup() {
-  // Генерация синусоиды в буфер
-  //for (int i = 0; i < BUFFER_SIZE; i++) {sineWave[i] = (uint8_t)sin(2 * PI * i / (BUFFER_SIZE / (float)SIGNAL_FREQ)) * 127 + 128;} // 0-255 для DAC (8 бит)
 
   Serial.begin(921600);
   dac_output_enable(DAC_CHANNEL_1);
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
-  pinMode(BUT_PIN,INPUT_PULLUP);
-
+/*
+  // Читаем внутреннюю калибровку ESP32
   Serial.print("esp_adc_cal_check_efuse... ESP_ADC_CAL_VAL_EFUSE_VREF: ");
   Serial.println(esp_adc_cal_check_efuse( ESP_ADC_CAL_VAL_EFUSE_VREF));
 
@@ -140,12 +140,11 @@ void setup() {
       Serial.print(adc_chars.vref);
       Serial.println(" мВ");
   }
-  
+  */
 
 }
 
 void loop() {
-  while (digitalRead(BUT_PIN) != 0){}
   Serial.println("Начало калибровки...");
   // Этап 1: Измерения
   Measure(100);
@@ -153,14 +152,12 @@ void loop() {
   while(Serial.parseInt() != 1){}
   for(int i = 0; i < DAC_RES; i++) {PrintData(i*16,RawData[i]);}
   
-  delay(5000);
   // Этап 2: Интерполяция
   while(Serial.parseInt() != 1){}
   Serial.println("Основная интерполяция (256 -> 4096 точек)");
   Interpolate();
-  for(int i = 0; i < ADC_RES; i++) {PrintData(i,(uint16_t)InterpData[i]);}
-
-  delay(5000);
+  //for(int i = 0; i < ADC_RES; i++) {PrintData(i,(uint16_t)InterpData[i]);}
+  
   while(Serial.parseInt() != 1){}
   Serial.println("Высокоточная интерполяция (4096 -> 4096*5 точек)");
   FineInterpolate();
@@ -172,7 +169,6 @@ void loop() {
 #ifdef GRAPH
   // Режим графиков
   Serial.print("Режим графиков");
-  delay(5000);
   while(Serial.parseInt() != 1){}
   for (int i = 0; i < DAC_RES; i++) {
     dac_output_voltage(DAC_CHANNEL_1, i);
