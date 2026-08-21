@@ -281,29 +281,36 @@ class SerialPlotter:
 
             sleep(0.001)
 
-    # ---------- Парсер строки данных (новый формат) ----------
+    # ---------- Парсер строки данных (новый формат + команда сброса) ----------
     def process_data_line(self, line):
         """
-        Парсит строку вида:  |Before = N , After= M|
-        Допускаются пробелы, другие имена переменных.
-        Если строка не соответствует формату, просто игнорируется (не ломает программу).
+        Парсит строку вида:  |Before = N , After= M|  (или с любым числом пар)
+        Также обрабатывает специальную команду сброса графика: |PLOT_RST|
+        Если строка не соответствует формату, просто игнорируется.
         """
         try:
-            # 1. Удаляем всё, кроме нужных символов: буквы, цифры, пробелы, знаки =, |, ,
-            # Но оставляем только те строки, где есть '|' и '='
+            # ---- Команда сброса графика ----
+            if line.upper() == "|PLOT_RST|":
+                print("[Парсер] Получена команда сброса графика |PLOT_RST|")
+                # Очищаем данные и график
+                self.data.clear()
+                self.line_names.clear()
+                self.user_zoom = False
+                # Перерисовываем пустой график
+                self.master.after(0, self.clear_graph)
+                return
+
+            # ---- Обычный парсинг данных ----
             if '|' not in line or '=' not in line:
                 print(f"[Парсер] Игнорирую строку (нет | или =): {line}")
                 return
 
-            # 2. Извлекаем содержимое между вертикальными чертами
             match = re.search(r'\|(.*?)\|', line)
             if not match:
                 print(f"[Парсер] Игнорирую (нет парных |): {line}")
                 return
 
             inner = match.group(1).strip()
-
-            # 3. Разбиваем по запятым
             parts = inner.split(',')
             if len(parts) < 1:
                 print(f"[Парсер] Игнорирую (нет данных после разбиения): {line}")
@@ -311,12 +318,10 @@ class SerialPlotter:
 
             need_update = False
 
-            # 4. Для каждой части вида "Имя = Число"
             for part in parts:
                 part = part.strip()
                 if '=' not in part:
                     continue
-                # Разделяем по '='
                 name_val = part.split('=', 1)
                 if len(name_val) != 2:
                     continue
@@ -361,10 +366,13 @@ class SerialPlotter:
             # Любая ошибка в парсинге не должна ломать программу
             print(f"[Парсер] Ошибка обработки строки '{line}': {e}")
 
-    # ---------- Отложенное обновление графика ----------
+    # ---------- Отложенное обновление графика (ускоренная версия) ----------
     def _delayed_update(self):
+        """Запускает обновление графика в основном потоке с минимальной задержкой"""
         self._plot_pending = True
-        self.master.after(10, self._perform_update)
+        # Используем after_idle вместо фиксированной задержки, чтобы обновление
+        # выполнялось, когда цикл событий свободен, но как можно быстрее
+        self.master.after_idle(self._perform_update)
 
     # ---------- Непосредственное обновление графика ----------
     def _perform_update(self):
@@ -400,7 +408,12 @@ class SerialPlotter:
             self.ax.set_xlim(xlim)
             self.ax.set_ylim(ylim)
 
-        self.figure.tight_layout(pad=0.3)
+        # Убираем tight_layout для ускорения (оставляем только при необходимости)
+        try:
+            self.figure.tight_layout(pad=0.2)
+        except:
+            pass
+
         self.canvas.draw_idle()
 
     # ---------- Обработка прокрутки мыши (масштабирование) ----------
