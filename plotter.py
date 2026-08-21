@@ -33,7 +33,7 @@ class SerialPlotter:
         self.ser = None
         self.data = {}
         self.line_names = []
-        self.max_points_horizontal = 500  # Уменьшено для скорости
+        self.max_points_horizontal = 500
         self.max_points_vertical = None
         self.buffer = ""
         self.serial_thread = None
@@ -42,85 +42,113 @@ class SerialPlotter:
         self.show_raw_data = False
         self.data_counter = 0
         self._plot_pending = False
+        self.user_zoom = False  # Флаг, что пользователь использовал масштабирование
 
-        # Настройка GUI
+        # Создание интерфейса
         self.create_widgets()
 
         # Инициализация графика
         self.figure, self.ax = plt.subplots(figsize=(8, 4), dpi=100)
         self.figure.set_facecolor('#f0f0f0')
         self.ax.set_facecolor('#f0f0f0')
-        self.canvas = FigureCanvasTkAgg(self.figure, master=self.master)
-        self.canvas.get_tk_widget().grid(row=10, column=0, columnspan=2, sticky=tk.NSEW, padx=5, pady=5)
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self.frame_right)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self.ax.grid(True)
         self.clear_graph()
 
+        # Привязка событий мыши для масштабирования
+        self.canvas.mpl_connect('scroll_event', self.on_scroll)
+
     def create_widgets(self):
+        # Основное окно разделим на две части: левая панель управления, правая - график
+        self.master.grid_columnconfigure(0, weight=0, minsize=250)  # Левая колонка фиксированной ширины
+        self.master.grid_columnconfigure(1, weight=1)               # Правая колонка растягивается
+        self.master.grid_rowconfigure(0, weight=1)
+
+        # Левая панель (управление)
+        self.frame_left = ttk.Frame(self.master, padding="5")
+        self.frame_left.grid(row=0, column=0, sticky=tk.N+tk.S+tk.W+tk.E)
+
+        # Правая панель (график)
+        self.frame_right = ttk.Frame(self.master)
+        self.frame_right.grid(row=0, column=1, sticky=tk.N+tk.S+tk.E+tk.W)
+
+        # Стили
         style = ttk.Style()
         style.configure('TButton', padding=5)
         style.configure('TCheckbutton', padding=5)
 
-        # COM-порт
-        ttk.Label(self.master, text="COM-порт:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-        self.port_list = ttk.Combobox(self.master, state="readonly")
-        self.port_list.grid(row=0, column=1, sticky=tk.EW, padx=5, pady=5)
+        # Виджеты управления (все размещаются во frame_left)
+        row = 0
+        ttk.Label(self.frame_left, text="COM-порт:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.port_list = ttk.Combobox(self.frame_left, state="readonly")
+        self.port_list.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
         self.update_port_list()
         self.port_list.bind("<<ComboboxSelected>>", self.on_port_selected)
+        row += 1
 
-        # Скорость порта
-        ttk.Label(self.master, text="Скорость (бод):").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
-        self.baud_list = ttk.Combobox(self.master, 
+        ttk.Label(self.frame_left, text="Скорость (бод):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.baud_list = ttk.Combobox(self.frame_left,
                                     values=[9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600],
                                     state="readonly")
-        self.baud_list.grid(row=1, column=1, sticky=tk.EW, padx=5, pady=5)
-        self.baud_list.set(921600)
+        self.baud_list.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.baud_list.set(115200)
+        row += 1
 
-        # Настройки графика
-        ttk.Label(self.master, text="Макс. точек:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
-        self.max_horiz_entry = ttk.Entry(self.master)
+        ttk.Label(self.frame_left, text="Макс. точек:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.max_horiz_entry = ttk.Entry(self.frame_left)
         self.max_horiz_entry.insert(0, "500")
-        self.max_horiz_entry.grid(row=2, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.max_horiz_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        row += 1
 
-        ttk.Label(self.master, text="Макс. значение:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=5)
-        self.max_vert_entry = ttk.Entry(self.master)
+        ttk.Label(self.frame_left, text="Макс. значение:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.max_vert_entry = ttk.Entry(self.frame_left)
         self.max_vert_entry.insert(0, "нет")
-        self.max_vert_entry.grid(row=3, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.max_vert_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        row += 1
 
-        # Режим отрисовки
-        ttk.Label(self.master, text="Режим отрисовки:").grid(row=4, column=0, sticky=tk.W, padx=5, pady=5)
-        self.plot_mode = ttk.Combobox(self.master, 
+        ttk.Label(self.frame_left, text="Режим отрисовки:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.plot_mode = ttk.Combobox(self.frame_left,
                                      values=["Реальное время", "30 раз/сек"],
                                      state="readonly")
         self.plot_mode.set("Реальное время")
-        self.plot_mode.grid(row=4, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.plot_mode.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        row += 1
 
-        # Чекбокс для сырых данных
         self.raw_data_var = tk.BooleanVar()
-        self.raw_data_cb = ttk.Checkbutton(self.master, text="Показывать сырые данные",
+        self.raw_data_cb = ttk.Checkbutton(self.frame_left, text="Показывать сырые данные",
                                           variable=self.raw_data_var,
                                           command=self.toggle_raw_data)
-        self.raw_data_cb.grid(row=5, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
+        self.raw_data_cb.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
+        row += 1
 
-        # Кнопки управления
-        self.start_stop_button = ttk.Button(self.master, text="Запустить", command=self.toggle_start_stop)
-        self.start_stop_button.grid(row=6, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
+        self.start_stop_button = ttk.Button(self.frame_left, text="Запустить", command=self.toggle_start_stop)
+        self.start_stop_button.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
+        row += 1
 
-        self.clear_button = ttk.Button(self.master, text="Очистить график", command=self.clear_graph)
-        self.clear_button.grid(row=7, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
+        self.clear_button = ttk.Button(self.frame_left, text="Очистить график", command=self.clear_graph)
+        self.clear_button.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
+        row += 1
 
-        # Отправка данных
-        ttk.Label(self.master, text="Отправить данные:").grid(row=8, column=0, sticky=tk.W, padx=5, pady=5)
-        self.send_entry = ttk.Entry(self.master)
-        self.send_entry.grid(row=8, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.reset_zoom_button = ttk.Button(self.frame_left, text="Сбросить масштаб", command=self.reset_zoom)
+        self.reset_zoom_button.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
+        row += 1
+
+        ttk.Label(self.frame_left, text="Отправить данные:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.send_entry = ttk.Entry(self.frame_left)
+        self.send_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
         self.send_entry.bind("<Return>", lambda event: self.send_data())
+        row += 1
 
-        self.send_button = ttk.Button(self.master, text="Отправить", command=self.send_data)
-        self.send_button.grid(row=9, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
+        self.send_button = ttk.Button(self.frame_left, text="Отправить", command=self.send_data)
+        self.send_button.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
+        row += 1
 
-        # Настройка размеров
-        self.master.grid_columnconfigure(1, weight=1)
-        self.master.grid_rowconfigure(10, weight=1)
-        self.master.minsize(500, 700)
+        # Растягивание колонок в левой панели
+        self.frame_left.grid_columnconfigure(1, weight=1)
+
+        # Чтобы левая панель не сжималась, добавляем вертикальный растягивающий элемент
+        self.frame_left.grid_rowconfigure(row, weight=1)  # Пустое место внизу
 
     def toggle_raw_data(self):
         self.show_raw_data = self.raw_data_var.get()
@@ -174,6 +202,7 @@ class SerialPlotter:
             self.line_names = []
             self.buffer = ""
             self.data_counter = 0
+            self.user_zoom = False  # Сбрасываем флаг при новом запуске
             self.clear_graph()
             
             self.serial_thread = threading.Thread(target=self.read_serial_data, daemon=True)
@@ -289,6 +318,11 @@ class SerialPlotter:
         if not self.data:
             return
             
+        # Сохраняем текущие пределы, если пользователь уже приближал
+        if self.user_zoom:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+        
         self.ax.clear()
         
         for name, values in self.data.items():
@@ -303,15 +337,60 @@ class SerialPlotter:
         self.ax.set_ylabel("Значение", fontsize=8)
         self.ax.set_title("Данные с COM-порта", fontsize=9)
         
-        if self.max_points_vertical is not None:
-            self.ax.set_ylim(-self.max_points_vertical, self.max_points_vertical)
+        # Если пользователь не изменял масштаб, применяем авто
+        if not self.user_zoom:
+            self.ax.relim()
+            self.ax.autoscale_view()
+        else:
+            # Восстанавливаем сохранённые пределы
+            self.ax.set_xlim(xlim)
+            self.ax.set_ylim(ylim)
         
         self.figure.tight_layout(pad=0.3)
         self.canvas.draw_idle()
 
+    def on_scroll(self, event):
+        """Обработчик прокрутки колесика мыши для масштабирования"""
+        if event.inaxes != self.ax:
+            return
+        self.user_zoom = True  # Пользователь начал масштабирование
+        
+        # Получаем текущие пределы
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        xdata = event.xdata
+        ydata = event.ydata
+        
+        # Определяем коэффициент масштабирования
+        if event.button == 'up':
+            scale_factor = 0.9  # Приближение
+        else:
+            scale_factor = 1.1  # Отдаление
+        
+        # Новые пределы с центром в точке курсора
+        new_xlim = [xdata - (xdata - xlim[0]) * scale_factor,
+                    xdata + (xlim[1] - xdata) * scale_factor]
+        new_ylim = [ydata - (ydata - ylim[0]) * scale_factor,
+                    ydata + (ylim[1] - ydata) * scale_factor]
+        
+        # Применяем новые пределы
+        self.ax.set_xlim(new_xlim)
+        self.ax.set_ylim(new_ylim)
+        self.canvas.draw_idle()
+
+    def reset_zoom(self):
+        """Сброс масштаба к автоматическому"""
+        self.user_zoom = False
+        self.update_graph()  # Перерисовываем с авто-масштабом
+
+    def update_graph(self):
+        """Обновляет график (вызывается из потока)"""
+        self.master.after(0, self._perform_update)
+
     def clear_graph(self):
         self.data.clear()
         self.line_names.clear()
+        self.user_zoom = False
         self.ax.clear()
         self.ax.grid(True)
         self.ax.set_xlabel("Номер точки", fontsize=8)
@@ -350,8 +429,8 @@ if __name__ == "__main__":
     root = tk.Tk()
     
     # Центрирование окна
-    window_width = 600
-    window_height = 750
+    window_width = 900
+    window_height = 700
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
     x = (screen_width // 2) - (window_width // 2)
