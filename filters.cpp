@@ -16,7 +16,8 @@ const int DAC_RES = 256;        // 8-битный DAC
 //*!< DAC channel 1 is GPIO25(ESP32) / GPIO17(ESP32S2) */
 #define BUT_PIN 36 // 5 arduino
 
-const uint16_t ADC_LUT[4096]= {
+const uint16_t ADC_LUT[4096]= 
+{
 0,97,98,99,100,101,102,103,104,105,107,108,109,110,111,112,
 113,115,116,117,119,120,121,123,124,125,127,128,129,130,131,132,
 133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,149,
@@ -286,10 +287,16 @@ template <typename A, typename B>
 void PrintData (A a, B b)
 {
   Serial.print("Data1 ");
-  Serial.print((int)a);
+  Serial.print((uint16_t)a);
   Serial.print(" ");
   Serial.print("Data2 ");
-  Serial.println((int)b);
+  Serial.println((uint16_t)b);
+}
+
+uint8_t readCalValue()
+{
+  uint16_t rawValue = analogRead(ADC_PIN);
+  return  (ADC_LUT[rawValue] >>4);
 }
 
 uint8_t addNoise(uint8_t baseVoltage) {
@@ -338,8 +345,8 @@ float runMiddleArifmOptim(float newVal) {
   static float average = 0;
   if (++t >= NUM_READ) t = 0; // перемотка t
   average -= vals[t];         // вычитаем старое
-  average += noisedSignal;          // прибавляем новое
-  vals[t] = noisedSignal;           // запоминаем в массив
+  average += newVal;          // прибавляем новое
+  vals[t] = newVal;           // запоминаем в массив
   return ((float)average / NUM_READ);
 }
 
@@ -347,6 +354,8 @@ float runMiddleArifmOptim(float newVal) {
 float expRunningAverage(float newVal) {
   float k = 0.1;  // коэффициент фильтрации, 0.0-1.0
   static float filVal = 0;
+
+  //фильтрованное += (новое - фильтрованное) * коэффициент
   filVal += (newVal - filVal) * k;
   return filVal;
 }
@@ -354,11 +363,9 @@ float expRunningAverage(float newVal) {
 // Сюда вставляем нашу выборку и фильтрацию
 void adcTask(void *parameter) {
   while (1) {
-    float k = 0.5;  // коэффициент фильтрации, 0.0-1.0
-  // бегущее среднее
-
+    float k = 0.5; 
   static float filVal = 0;
-  filVal += (analogRead(ADC_PIN) - filVal) * k;
+  filVal += (readCalValue() - filVal) * k;
   filteredSignal = filVal;
  
   vTaskDelay(15);
@@ -405,6 +412,7 @@ void loop() {
     noisedSignal = addNoise(clearSignal);
     dac_output_voltage(DAC_CHANNEL_1, noisedSignal);
 
-    PrintData(noisedSignal,filteredSignal);
+    //PrintData(noisedSignal, (readCalValue()));
+    PrintData(noisedSignal,filteredSignal); 
   }
 }

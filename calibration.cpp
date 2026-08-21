@@ -1,4 +1,4 @@
-#define GRAPH
+#define GRAPH     // Выводим графики
 
 #include <driver/dac.h>
 #include <Arduino.h>
@@ -12,14 +12,14 @@ const int INTERP_STEPS = 16;    // Шагов интерполяции
 const int FINE_STEPS = 5;       // Точная интерполяция
 const int AVG_COEF = 2;
 
-#define ADC_PIN 35 
-//*!< DAC channel 1 is GPIO25(ESP32) / GPIO17(ESP32S2) */
-#define BUT_PIN 36 // 5 arduino
+#define ADC_PIN 35    // ADC1_7 channel
+// DAC channel 1 is GPIO25(ESP32) / GPIO17(ESP32S2)
+#define BUT_PIN 36
 
 
 
-float RawData[DAC_RES] = {0};   // Сырые данные (256 точек)
-float InterpData[ADC_RES] = {0};// Интерполированные данные (4096 точек)
+float RawData[DAC_RES] = {0};             // Сырые данные (256 точек)
+float InterpData[ADC_RES] = {0};          // Интерполированные данные (4096 точек)
 float FineData[ADC_RES*FINE_STEPS] = {0}; // Высокоточные данные
 
 template <typename A, typename B>
@@ -32,6 +32,7 @@ void PrintData (A a, B b)
   Serial.println((int)b);
 }
 
+// Подача через DAC, сырые измерения с сглаживанием (256 точек)
 void Measure(int cycles) 
 {
   for (int c = 0; c < cycles; c++)
@@ -55,8 +56,8 @@ void Measure(int cycles)
   }
 }
 
+// Основная интерполяция (256 -> 4096 точек)
 void Interpolate() {
-  // Основная интерполяция (256 -> 4096 точек)
   for (int i = 0; i < DAC_RES-1; i++) {
     int idx = i * INTERP_STEPS;
     float step = (RawData[i+1] - RawData[i]) / INTERP_STEPS;
@@ -68,9 +69,8 @@ void Interpolate() {
   // Заполняем последние значения
   InterpData[ADC_RES-1] = RawData[DAC_RES-1];
 }
-
+// Точная интерполяция  
 void FineInterpolate() {
-  //  
   for (int i = 0; i < ADC_RES-1; i++) {
     float step = (InterpData[i+1] - InterpData[i]) / FINE_STEPS;
     for (int j = 0; j < FINE_STEPS; j++) {
@@ -78,9 +78,8 @@ void FineInterpolate() {
     }
   }
 }
-
+// Построение финальной LUT
 void BuildLUT() {
-  // Построение финальной LUT
   for (int i = 0; i < ADC_RES; i++) {
     float min_diff = INFINITY;
     int best_idx = 0;
