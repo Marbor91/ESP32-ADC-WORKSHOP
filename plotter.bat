@@ -16,6 +16,6 @@ exit /B
 pushd "%~dp0"
 
 :: Укажите путь к вашему python.exe и вашему .py файлу (в кавычках, если есть пробелы)
-python "C:\Users\Marbor\YandexDisk\OTUS\ОУ АЦП ESP32. Оцифровать сигнал\ESP32-ADC-WORKSHOP\plotter.py"
+python "C:\ESP32-ADC-WORKSHOP\plotter.py"
 
 pause

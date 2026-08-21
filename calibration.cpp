@@ -12,9 +12,11 @@ const int INTERP_STEPS = 16;    // Шагов интерполяции
 const int FINE_STEPS = 5;       // Точная интерполяция
 const int AVG_COEF = 2;
 
-#define ADC_PIN 35    // ADC1_7 channel
-// DAC channel 1 is GPIO25(ESP32) / GPIO17(ESP32S2)
-#define BUT_PIN 36
+#define UART_SPEED    921600
+#define ADC_PIN       35            // ADC1_7 channel
+#define DAC_PIN       DAC_CHANNEL_1 // DAC channel 1 is GPIO25(ESP32) / GPIO17(ESP32S2)
+#define BUT_PIN       36
+#define NEXT_STEP_NUM 1
 
 
 
@@ -25,11 +27,8 @@ float FineData[ADC_RES*FINE_STEPS] = {0}; // Высокоточные данны
 template <typename A, typename B>
 void PrintData (A a, B b)
 {
-  Serial.print("Data1 ");
-  Serial.print((int)a);
-  Serial.print(" ");
-  Serial.print("Data2 ");
-  Serial.println((int)b);
+  Serial.printf("|Before=%d,After=%d|\r\n", (int)a, (int)b);
+  delay(1);
 }
 
 // Подача через DAC, сырые измерения с сглаживанием (256 точек)
@@ -38,7 +37,7 @@ void Measure(int cycles)
   for (int c = 0; c < cycles; c++)
   {
     for (int i = 0; i < DAC_RES; i++) {
-      dac_output_voltage(DAC_CHANNEL_1, i);
+      dac_output_voltage(DAC_PIN, i);
       delayMicroseconds(100); // Увеличенное время стабилизации
       
       // Усреднение измерений
@@ -63,7 +62,7 @@ void Interpolate() {
     float step = (RawData[i+1] - RawData[i]) / INTERP_STEPS;
     
     for (int j = 0; j < INTERP_STEPS; j++) {
-      InterpData[idx+j] = RawData[i] + step * j;
+        InterpData[idx+j] = RawData[i] + step * j;
     }
   }
   // Заполняем последние значения
@@ -71,10 +70,11 @@ void Interpolate() {
 }
 // Точная интерполяция  
 void FineInterpolate() {
-  for (int i = 0; i < ADC_RES-1; i++) {
+  for (int i = 0; i < ADC_RES-1; i++) 
+  {
     float step = (InterpData[i+1] - InterpData[i]) / FINE_STEPS;
     for (int j = 0; j < FINE_STEPS; j++) {
-      FineData[i*FINE_STEPS+j] = InterpData[i] + step * j;
+        FineData[i*FINE_STEPS+j] = InterpData[i] + step * j;
     }
   }
 }
@@ -97,12 +97,20 @@ void BuildLUT() {
   }
 }
 
+void AwaitEnter()
+{
+    int static var = NEXT_STEP_NUM;
+    Serial.printf("Press %d for continue...\r\n", (int)var);
+    while(Serial.parseInt() != NEXT_STEP_NUM){}
+}
+
 void setup() {
 
-  Serial.begin(921600);
-  dac_output_enable(DAC_CHANNEL_1);
+  Serial.begin(UART_SPEED);
+  dac_output_enable(DAC_PIN);
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
+  delay(1000);  
 /*
   // Читаем внутреннюю калибровку ESP32
   Serial.print("esp_adc_cal_check_efuse... ESP_ADC_CAL_VAL_EFUSE_VREF: ");
@@ -144,21 +152,24 @@ void setup() {
 }
 
 void loop() {
-  Serial.println("Начало калибровки...");
+  Serial.println("Calibration start...");
+  AwaitEnter();
+
   // Этап 1: Измерения
   Measure(100);
-  Serial.println("Калибровка завершена");
-  while(Serial.parseInt() != 1){}
+  Serial.println("Calibration finished");
+  AwaitEnter();
   for(int i = 0; i < DAC_RES; i++) {PrintData(i*16,RawData[i]);}
   
   // Этап 2: Интерполяция
-  while(Serial.parseInt() != 1){}
-  Serial.println("Основная интерполяция (256 -> 4096 точек)");
+  Serial.println("Main interpolation (256 -> 4096 dotes)");
+  AwaitEnter();
+
   Interpolate();
   //for(int i = 0; i < ADC_RES; i++) {PrintData(i,(uint16_t)InterpData[i]);}
   
-  while(Serial.parseInt() != 1){}
-  Serial.println("Высокоточная интерполяция (4096 -> 4096*5 точек)");
+  Serial.println("Precision interpolation (4096 -> 4096*5 dotes)");
+  AwaitEnter();
   FineInterpolate();
   //for(int i = 0; i < (ADC_RES)*FINE_STEPS; i++) {PrintData(i,FineData[i]);}
   
@@ -167,17 +178,18 @@ void loop() {
 
 #ifdef GRAPH
   // Режим графиков
-  Serial.print("Режим графиков");
-  while(Serial.parseInt() != 1){}
+  Serial.print("Plot Mode");
+  AwaitEnter();
   for (int i = 0; i < DAC_RES; i++) {
-    dac_output_voltage(DAC_CHANNEL_1, i);
+    dac_output_voltage(DAC_PIN, i);
     delay(10);
     int raw = analogRead(ADC_PIN);
     PrintData (i*16, (uint16_t)InterpData[raw]);
   }
-  while(1);
 #else
   // Вывод LUT таблицы
+  Serial.print(" LUT table output mode");
+   AwaitEnter();
   Serial.println("const uint16_t ADC_LUT[4096] PROGMEM = {");
   for (int i = 0; i < ADC_RES; i++) {
     Serial.print((uint16_t)round(InterpData[i]));
@@ -185,9 +197,7 @@ void loop() {
     if (i % 16 == 15) Serial.println();
   }
   Serial.println("};");
-  
-  while(1);
 #endif
-
-
+    Serial.print("Programm finished");
+    while(1);
 }
