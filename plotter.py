@@ -26,34 +26,37 @@ class SerialPlotter:
         plt.rcParams['path.simplify_threshold'] = 1.0
         plt.rcParams['lines.antialiased'] = False
         plt.rcParams['backend'] = 'TkAgg'
+        plt.rcParams['figure.dpi'] = 80          # Уменьшаем DPI для ускорения
+
+        # ---------- Параметры настройки ----------
+        self.max_points_horizontal = 500          # Максимум точек на графике по горизонтали (фикс)
+        self.max_points_vertical = 4000           # Максимум по вертикали (фикс, от 0 до max)
 
         # Переменные состояния
         self.is_running = False              # Флаг работы потока чтения
         self.serial_port = None              # Имя COM-порта
         self.ser = None                      # Объект Serial
-        self.data = {}                       # Словарь для хранения данных: {имя: список значений}
+        self.data = {}                       # Текущий накапливаемый буфер данных
         self.line_names = []                 # Список имён для отображения в легенде
-        self.max_points_horizontal = 200     # Уменьшено для скорости (используется, если авто выключено)
-        self.max_points_vertical = None      # Максимум по вертикали (используется, если авто выключено)
         self.buffer = ""                     # Буфер для накопления данных из порта
         self.serial_thread = None            # Поток чтения
-        self.last_plot_time = 0              # Для режима "30 раз/сек"
-        self.plot_interval = 0               # 0 - реальное время, иначе период обновления
         self.show_raw_data = False           # Флаг вывода сырых данных в консоль
         self.data_counter = 0                # Счётчик строк для вывода
-        self._plot_pending = False           # Флаг для предотвращения множественных обновлений
         self._update_id = None               # ID отложенного обновления для отмены
         self.user_zoom = False               # Флаг, что пользователь приблизил график
 
-        # Переменные для авто-режимов
-        self.auto_horiz = tk.BooleanVar(value=True)   # Авто по горизонтали
-        self.auto_vert = tk.BooleanVar(value=True)    # Авто по вертикали
+        # Параметры отображения
+        self.plot_mode = tk.StringVar(value="Линии+точки")  # Режим отображения
+        self.line_width = tk.DoubleVar(value=1.0)           # Толщина линий/точек
+
+        # Словарь для хранения объектов линий (для быстрого обновления)
+        self.lines = {}
 
         # Создание интерфейса (расположение: панель управления слева, график справа)
         self.create_widgets()
 
         # Инициализация графика
-        self.figure, self.ax = plt.subplots(figsize=(8, 4), dpi=100)
+        self.figure, self.ax = plt.subplots(figsize=(8, 4), dpi=80)
         self.figure.set_facecolor('#f0f0f0')
         self.ax.set_facecolor('#f0f0f0')
         self.canvas = FigureCanvasTkAgg(self.figure, master=self.frame_right)
@@ -107,37 +110,39 @@ class SerialPlotter:
         self.baud_list.set(115200)
         row += 1
 
-        # Макс. точек (горизонталь) + чекбокс "Авто"
+        # Макс. точек (горизонталь)
         ttk.Label(self.frame_left, text="Макс. точек:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
         self.max_horiz_entry = ttk.Entry(self.frame_left)
         self.max_horiz_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
-        self.max_horiz_entry.insert(0, "200")
+        self.max_horiz_entry.insert(0, "500")
         self.max_horiz_entry.bind("<KeyRelease>", lambda e: self.update_settings())
-        self.auto_horiz_cb = ttk.Checkbutton(self.frame_left, text="Авто",
-                                             variable=self.auto_horiz,
-                                             command=self.update_settings)
-        self.auto_horiz_cb.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
-        # Макс. значение (вертикаль) + чекбокс "Авто"
+        # Макс. значение (вертикаль)
         ttk.Label(self.frame_left, text="Макс. значение:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
         self.max_vert_entry = ttk.Entry(self.frame_left)
         self.max_vert_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
-        self.max_vert_entry.insert(0, "4100")
+        self.max_vert_entry.insert(0, "4000")
         self.max_vert_entry.bind("<KeyRelease>", lambda e: self.update_settings())
-        self.auto_vert_cb = ttk.Checkbutton(self.frame_left, text="Авто",
-                                            variable=self.auto_vert,
-                                            command=self.update_settings)
-        self.auto_vert_cb.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
-        # Режим отрисовки
-        ttk.Label(self.frame_left, text="Режим отрисовки:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-        self.plot_mode = ttk.Combobox(self.frame_left,
-                                     values=["Реальное время", "30 раз/сек"],
-                                     state="readonly")
-        self.plot_mode.set("Реальное время")
-        self.plot_mode.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        # Режим отображения (выпадающий список)
+        ttk.Label(self.frame_left, text="Режим отображения:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.plot_mode_cb = ttk.Combobox(self.frame_left,
+                                         values=["Линии+точки", "Только линии", "Только точки"],
+                                         state="readonly",
+                                         textvariable=self.plot_mode)
+        self.plot_mode_cb.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.plot_mode_cb.bind("<<ComboboxSelected>>", lambda e: self.update_settings())
+        row += 1
+
+        # Ползунок толщины линий/точек
+        ttk.Label(self.frame_left, text="Толщина линий/точек:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.line_width_scale = tk.Scale(self.frame_left, from_=0.5, to=5.0, resolution=0.5,
+                                         orient=tk.HORIZONTAL, variable=self.line_width,
+                                         command=lambda e: self.update_settings())
+        self.line_width_scale.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.line_width_scale.set(1.0)
         row += 1
 
         # Чекбокс показа сырых данных
@@ -174,7 +179,6 @@ class SerialPlotter:
 
         # Растягивание колонок в левой панели
         self.frame_left.grid_columnconfigure(1, weight=1)
-        self.frame_left.grid_columnconfigure(2, weight=0)
         self.frame_left.grid_rowconfigure(row, weight=1)
 
     # ---------- События для чекбокса ----------
@@ -207,15 +211,6 @@ class SerialPlotter:
         # Обновляем настройки
         self.update_settings()
 
-        # Режим отрисовки
-        try:
-            if self.plot_mode.get() == "30 раз/сек":
-                self.plot_interval = 1/30
-            else:
-                self.plot_interval = 0
-        except:
-            self.plot_interval = 0
-
         # Открытие порта
         try:
             self.ser = serial.Serial(
@@ -231,6 +226,7 @@ class SerialPlotter:
             # Очищаем старые данные
             self.data = {}
             self.line_names = []
+            self.lines = {}
             self.buffer = ""
             self.data_counter = 0
             self.user_zoom = False
@@ -254,7 +250,6 @@ class SerialPlotter:
         if self._update_id is not None:
             self.master.after_cancel(self._update_id)
             self._update_id = None
-        self._plot_pending = False
 
         if hasattr(self, 'serial_thread') and self.serial_thread:
             self.serial_thread.join(timeout=1)
@@ -311,12 +306,13 @@ class SerialPlotter:
 
             sleep(0.001)
 
-    # ---------- Парсер строки данных (новый формат + команда сброса) ----------
+    # ---------- Парсер строки данных (новый формат + команды) ----------
     def process_data_line(self, line):
         """
         Парсит строку вида:  |Before = N , After= M|  (или с любым числом пар)
-        Также обрабатывает специальную команду сброса графика: |PLOT_RST|
-        Если строка не соответствует формату, просто игнорируется.
+        Обрабатывает команды:
+          |PLOT_RST|  – сброс графика (очистка данных)
+          |PLOT_END|  – завершение кадра – отрисовка накопленных данных
         """
         try:
             # ---- Команда сброса графика ----
@@ -325,28 +321,30 @@ class SerialPlotter:
                 # Очищаем данные и график
                 self.data.clear()
                 self.line_names.clear()
+                self.lines.clear()
                 self.user_zoom = False
-                # Перерисовываем пустой график
                 self.master.after(0, self.clear_graph)
                 return
 
-            # ---- Обычный парсинг данных ----
+            # ---- Команда завершения кадра ----
+            if line.upper() == "|PLOT_END|":
+                print("[Парсер] Получена команда |PLOT_END| – отрисовка кадра")
+                # Отрисовываем текущий накопленный кадр и затем очищаем данные для нового
+                self.master.after(0, self.finalize_frame)
+                return
+
+            # ---- Обычный парсинг данных (если не команда) ----
             if '|' not in line or '=' not in line:
-                # print(f"[Парсер] Игнорирую строку (нет | или =): {line}") # Закомментировано для скорости
                 return
 
             match = re.search(r'\|(.*?)\|', line)
             if not match:
-                # print(f"[Парсер] Игнорирую (нет парных |): {line}")
                 return
 
             inner = match.group(1).strip()
             parts = inner.split(',')
             if len(parts) < 1:
-                # print(f"[Парсер] Игнорирую (нет данных после разбиения): {line}")
                 return
-
-            need_update = False
 
             for part in parts:
                 part = part.strip()
@@ -360,103 +358,159 @@ class SerialPlotter:
                 try:
                     value = float(val_str)
                 except ValueError:
-                    # print(f"[Парсер] Не число в значении: {val_str} в строке: {line}")
                     continue
-
-                # Применяем ограничение по вертикали (если авто выключено)
-                if not self.auto_vert.get() and self.max_points_vertical is not None:
-                    value = max(min(value, self.max_points_vertical), -self.max_points_vertical)
 
                 # Инициализируем список для нового имени
                 if name not in self.data:
                     self.data[name] = []
                     if name not in self.line_names:
                         self.line_names.append(name)
-                        need_update = True
 
                 # Добавляем значение
                 self.data[name].append(value)
-
-                # Если авто выключено, применяем ограничение по горизонтали (обрезаем до max_points_horizontal)
-                if not self.auto_horiz.get() and self.max_points_horizontal is not None:
-                    if len(self.data[name]) > self.max_points_horizontal:
-                        self.data[name].pop(0)
-
-                need_update = True
-
-            # Если были добавлены данные, запускаем обновление графика
-            if need_update:
-                if self.plot_interval == 0:
-                    if not self._plot_pending:
-                        self._delayed_update()
-                else:
-                    current_time = time()
-                    if (current_time - self.last_plot_time) >= self.plot_interval:
-                        self._delayed_update()
-                        self.last_plot_time = current_time
+                # Ограничиваем длину списка, чтобы не переполнять память (можно хранить все, но отрезать при отрисовке)
+                # Оставим неограниченным, отрезаем при отрисовке до max_points_horizontal
 
         except Exception as e:
-            # Любая ошибка в парсинге не должна ломать программу
             print(f"[Парсер] Ошибка обработки строки '{line}': {e}")
 
-    # ---------- Отложенное обновление графика (ускоренная версия с задержкой) ----------
-    def _delayed_update(self):
-        """Запускает обновление графика в основном потоке с задержкой 10 мс для снижения нагрузки"""
-        if self._plot_pending:
+    # ---------- Завершение кадра (отрисовка и очистка) ----------
+    def finalize_frame(self):
+        """Вызывается при получении |PLOT_END| – отображает накопленные данные и очищает буфер."""
+        if not self.data:
+            # Если данных нет, ничего не делаем
             return
-        self._plot_pending = True
-        # Если уже есть запланированное обновление, отменяем его
-        if self._update_id is not None:
-            self.master.after_cancel(self._update_id)
-            self._update_id = None
-        self._update_id = self.master.after(10, self._perform_update)
 
-    # ---------- Непосредственное обновление графика ----------
-    def _perform_update(self):
-        self._update_id = None
-        self._plot_pending = False
+        # Обновляем настройки (на случай, если пользователь изменил параметры)
+        self.update_settings()
+
+        # Отрисовываем кадр
+        self._perform_update(keep_data=True)  # не очищаем данные, они будут очищены после отрисовки
+
+        # Очищаем буфер данных для нового кадра
+        self.data.clear()
+        self.line_names.clear()
+        self.lines.clear()   # линии будут пересозданы при следующем кадре
+
+    # ---------- Обновление настроек (при изменении полей/чекбоксов) ----------
+    def update_settings(self):
+        """Считывает значения полей, обновляет переменные и применяет ограничения к уже имеющимся данным."""
+        # Обновляем значения из полей
+        try:
+            horiz_val = int(self.max_horiz_entry.get())
+            self.max_points_horizontal = horiz_val if horiz_val > 0 else 1
+        except ValueError:
+            self.max_points_horizontal = 500
+
+        try:
+            vert_val = self.max_vert_entry.get().strip()
+            if vert_val.lower() == "нет" or vert_val == "":
+                self.max_points_vertical = None
+            else:
+                self.max_points_vertical = float(vert_val)
+                if self.max_points_vertical < 0:
+                    self.max_points_vertical = None
+        except ValueError:
+            self.max_points_vertical = 4000
+
+        # Если есть данные, перерисовываем их с новыми настройками
+        if self.data:
+            self._perform_update()
+
+    # ---------- Отрисовка (основной метод) ----------
+    def _perform_update(self, keep_data=False):
+        """
+        Отрисовывает текущие данные (self.data) с учётом настроек.
+        Если keep_data=True, данные не очищаются (используется при финализации кадра,
+        но очистка выполняется в finalize_frame).
+        """
         if not self.data:
             return
 
-        # Сохраняем текущие пределы, если пользователь приближал
+        # Сохраняем пределы, если пользователь приближал
         if self.user_zoom:
             xlim = self.ax.get_xlim()
             ylim = self.ax.get_ylim()
 
-        self.ax.clear()
+        # Удаляем линии для отсутствующих имён
+        for name in list(self.lines.keys()):
+            if name not in self.data or not self.data[name]:
+                self.lines[name].remove()
+                del self.lines[name]
 
+        # Получаем параметры отображения
+        mode = self.plot_mode.get()
+        lw = self.line_width.get()
+        # Определяем стиль линии и маркера
+        if mode == "Линии+точки":
+            linestyle = '-'
+            marker = 'o'
+            markersize = lw * 2  # размер точки пропорционален толщине
+        elif mode == "Только линии":
+            linestyle = '-'
+            marker = ''
+            markersize = 0
+        else:  # "Только точки"
+            linestyle = 'none'
+            marker = 'o'
+            markersize = lw * 3  # размер точки чуть больше
+
+        # Обновляем или создаём линии
         for name, values in self.data.items():
-            if values:
-                self.ax.plot(values, label=name)
+            if not values:
+                continue
+            # Берём последние self.max_points_horizontal точек
+            display_values = values[-self.max_points_horizontal:] if self.max_points_horizontal else values
+            x = range(len(display_values))
+            if name in self.lines:
+                # Обновляем существующую линию
+                self.lines[name].set_data(x, display_values)
+                self.lines[name].set_linestyle(linestyle)
+                self.lines[name].set_marker(marker)
+                self.lines[name].set_linewidth(lw)
+                self.lines[name].set_markersize(markersize)
+            else:
+                # Создаём новую линию
+                line, = self.ax.plot(x, display_values, label=name,
+                                     linestyle=linestyle, marker=marker,
+                                     linewidth=lw, markersize=markersize)
+                self.lines[name] = line
 
-        if self.data:
+        # Обновляем легенду (если изменился набор линий)
+        if self.lines:
             self.ax.legend(fontsize=8)
-            self.ax.grid(True)
+        else:
+            if self.ax.legend_ is not None:
+                self.ax.legend_.remove()
 
+        self.ax.grid(True)
+
+        # Устанавливаем заголовки
         self.ax.set_xlabel("Номер точки", fontsize=8)
         self.ax.set_ylabel("Значение", fontsize=8)
         self.ax.set_title("Данные с COM-порта", fontsize=9)
 
-        # Если пользователь не изменял масштаб, применяем авто или фиксированные пределы
+        # Устанавливаем пределы осей
         if not self.user_zoom:
-            if self.auto_vert.get():
+            if self.max_points_vertical is not None:
+                self.ax.set_ylim(0, self.max_points_vertical)
+            else:
                 self.ax.relim()
                 self.ax.autoscale_view()
-            else:
-                if self.max_points_vertical is not None:
-                    self.ax.set_ylim(-self.max_points_vertical, self.max_points_vertical)
-                else:
-                    self.ax.relim()
-                    self.ax.autoscale_view()
+            # по горизонтали можно оставить авто, либо установить фиксированный диапазон 0..max_points_horizontal
+            if self.max_points_horizontal:
+                self.ax.set_xlim(0, self.max_points_horizontal)
         else:
             # Восстанавливаем сохранённые пределы
             self.ax.set_xlim(xlim)
             self.ax.set_ylim(ylim)
 
-        # Полностью убираем tight_layout для ускорения
-        # self.figure.tight_layout(pad=0.2)  # Закомментировано
-
+        # Перерисовываем
         self.canvas.draw_idle()
+
+    # ---------- Отложенное обновление (не используется, оставлено для совместимости) ----------
+    def _delayed_update(self):
+        pass  # не используется
 
     # ---------- Обработка прокрутки мыши (масштабирование) ----------
     def on_scroll(self, event):
@@ -486,21 +540,16 @@ class SerialPlotter:
     # ---------- Сброс масштаба ----------
     def reset_zoom(self):
         self.user_zoom = False
-        self._perform_update()
-
-    # ---------- Обновление графика (вызывается из потока) ----------
-    def update_graph(self):
-        self.master.after(0, self._perform_update)
+        if self.data:
+            self._perform_update()
 
     # ---------- Очистка графика и данных ----------
     def clear_graph(self):
-        # Отменяем все отложенные обновления при очистке
-        if self._update_id is not None:
-            self.master.after_cancel(self._update_id)
-            self._update_id = None
-        self._plot_pending = False
         self.data.clear()
         self.line_names.clear()
+        for line in self.lines.values():
+            line.remove()
+        self.lines.clear()
         self.user_zoom = False
         self.ax.clear()
         self.ax.grid(True)
@@ -508,36 +557,6 @@ class SerialPlotter:
         self.ax.set_ylabel("Значение", fontsize=8)
         self.ax.set_title("Данные с COM-порта", fontsize=9)
         self.canvas.draw()
-
-    # ---------- Обновление настроек (при изменении полей/чекбоксов) ----------
-    def update_settings(self):
-        """Считывает значения полей, обновляет переменные и применяет ограничения к уже имеющимся данным."""
-        # Обновляем значения из полей
-        try:
-            horiz_val = int(self.max_horiz_entry.get())
-            self.max_points_horizontal = horiz_val if horiz_val > 0 else 1
-        except ValueError:
-            self.max_points_horizontal = 200
-
-        try:
-            vert_val = self.max_vert_entry.get().strip()
-            if vert_val.lower() == "нет" or vert_val == "":
-                self.max_points_vertical = None
-            else:
-                self.max_points_vertical = float(vert_val)
-                if self.max_points_vertical < 0:
-                    self.max_points_vertical = None
-        except ValueError:
-            self.max_points_vertical = None
-
-        # Если авто по горизонтали выключено, обрезаем существующие данные до лимита
-        if not self.auto_horiz.get() and self.max_points_horizontal is not None:
-            for name in list(self.data.keys()):
-                if len(self.data[name]) > self.max_points_horizontal:
-                    self.data[name] = self.data[name][-self.max_points_horizontal:]
-
-        # Перерисовываем график с новыми настройками
-        self._perform_update()
 
     # ---------- Отправка данных в порт ----------
     def send_data(self):
@@ -571,7 +590,7 @@ if __name__ == "__main__":
 
     # Центрирование окна
     window_width = 950
-    window_height = 700
+    window_height = 720
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
     x = (screen_width // 2) - (window_width // 2)
