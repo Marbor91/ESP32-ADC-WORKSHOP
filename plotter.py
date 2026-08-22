@@ -114,13 +114,13 @@ class SerialPlotter:
         self.connect_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
-        # --- Скорость порта ---
+        # --- Скорость порта (дефолт 921600) ---
         ttk.Label(self.frame_left, text="Скорость (бод):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
         self.baud_list = ttk.Combobox(self.frame_left,
                                     values=[9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000, 4000000],
                                     state="readonly")
         self.baud_list.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
-        self.baud_list.set(115200)
+        self.baud_list.set(921600)
         row += 1
 
         # --- Выборок на кадр + кнопка Установить ---
@@ -187,12 +187,6 @@ class SerialPlotter:
         self.auto_cb.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
         row += 1
 
-        # --- Кнопка "Авто масштаб" (доступна только в авто режиме) ---
-        self.auto_scale_btn = ttk.Button(self.frame_left, text="Авто масштаб", 
-                                         command=self.reset_zoom, state="disabled")
-        self.auto_scale_btn.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
-        row += 1
-
         # --- Кнопка "Next step" ---
         self.next_step_btn = ttk.Button(self.frame_left, text="Next step", 
                                         command=self.send_next_step)
@@ -246,7 +240,6 @@ class SerialPlotter:
         state = "disabled" if auto else "normal"
         for w in widgets:
             w.config(state=state)
-        self.auto_scale_btn.config(state="normal" if auto else "disabled")
         if self.data and self.is_accepting:
             self._perform_update()
 
@@ -630,19 +623,6 @@ class SerialPlotter:
 
         self.canvas.draw_idle()
 
-    # ---------- Сброс масштаба (Авто масштаб) ----------
-    def reset_zoom(self):
-        """Сбрасывает пользовательский зум и применяет автоматическое масштабирование к текущему графику."""
-        self.user_zoom = False
-        # Перерисовываем график с автоматическими пределами
-        if self.data and self.is_accepting:
-            self._perform_update()
-        else:
-            # Если данных нет, просто сбрасываем масштаб пустого графика
-            self.ax.relim()
-            self.ax.autoscale_view()
-            self.canvas.draw_idle()
-
     # ---------- Панорамирование (средняя кнопка мыши) ----------
     def on_press(self, event):
         if event.button == 2:  # средняя кнопка
@@ -659,8 +639,9 @@ class SerialPlotter:
 
     def on_motion(self, event):
         if self.is_panning and event.xdata is not None and event.ydata is not None:
-            dx = event.xdata - self.pan_start_x
-            dy = event.ydata - self.pan_start_ydata
+            # Увеличиваем чувствительность в 2 раза и добавляем плавность
+            dx = (event.xdata - self.pan_start_x) * 1.2
+            dy = (event.ydata - self.pan_start_ydata) * 1.2
             new_xlim = [self.pan_start_xlim[0] - dx, self.pan_start_xlim[1] - dx]
             new_ylim = [self.pan_start_ylim[0] - dy, self.pan_start_ylim[1] - dy]
             self.ax.set_xlim(new_xlim)
