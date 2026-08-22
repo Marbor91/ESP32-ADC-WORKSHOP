@@ -30,18 +30,19 @@ class SerialPlotter:
         plt.rcParams['figure.dpi'] = 80
 
         # ---------- Параметры настройки ----------
-        self.samples_per_batch = 500          # Количество выборок на кадр (по умолчанию)
-        self.max_points_vertical = 4000       # Максимум по вертикали (от 0 до max)
-        self.sample_rate = 1000               # Частота дискретизации (Гц)
-        self.post_pause = 1000                # Пауза после отправки кадра (мс)
+        self.samples_per_batch = 500
+        self.max_points_vertical = 4000
+        self.sample_rate = 1000
+        self.post_pause = 1000
 
         # Переменные состояния
-        self.is_running = False
+        self.is_connected = False
+        self.is_accepting = False
         self.serial_port = None
         self.ser = None
-        self.data = {}                       # Текущий накапливаемый буфер данных
-        self.line_names = []                 # Список имён для отображения в легенде
-        self.buffer = ""                     # Буфер для накопления данных из порта
+        self.data = {}
+        self.line_names = []
+        self.buffer = ""
         self.serial_thread = None
         self.show_raw_data = False
         self.data_counter = 0
@@ -52,7 +53,7 @@ class SerialPlotter:
         self.plot_mode = tk.StringVar(value="Линии+точки")
         self.line_width = tk.DoubleVar(value=1.0)
 
-        # Словарь для хранения объектов линий (для быстрого обновления)
+        # Словарь для хранения объектов линий
         self.lines = {}
 
         # Создание интерфейса
@@ -91,25 +92,27 @@ class SerialPlotter:
 
         row = 0
 
-        # COM-порт
+        # --- COM-порт + кнопка Connect ---
         ttk.Label(self.frame_left, text="COM-порт:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
         self.port_list = ttk.Combobox(self.frame_left, state="readonly")
         self.port_list.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.port_list.bind("<Button-1>", self.update_port_list)
         self.update_port_list()
-        self.port_list.bind("<<ComboboxSelected>>", self.on_port_selected)
+
+        self.connect_btn = ttk.Button(self.frame_left, text="Connect", command=self.toggle_connect)
+        self.connect_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
-        # Скорость порта
+        # --- Скорость порта ---
         ttk.Label(self.frame_left, text="Скорость (бод):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
         self.baud_list = ttk.Combobox(self.frame_left,
-                                    values=[9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600],
+                                    values=[9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000, 4000000],
                                     state="readonly")
         self.baud_list.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
         self.baud_list.set(115200)
         row += 1
 
-        # ---------- Новые поля настроек ----------
-        # 1. Выборок на кадр + кнопка Установить
+        # --- Выборок на кадр + кнопка Установить ---
         ttk.Label(self.frame_left, text="Выборок на кадр:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
         self.samples_entry = ttk.Entry(self.frame_left)
         self.samples_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
@@ -119,15 +122,15 @@ class SerialPlotter:
         self.samples_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
-        # 2. Макс. значение (вертикаль)
-        ttk.Label(self.frame_left, text="Макс. значение:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        # --- Макс значение на графике ---
+        ttk.Label(self.frame_left, text="Макс значение на графике:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
         self.max_vert_entry = ttk.Entry(self.frame_left)
         self.max_vert_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
         self.max_vert_entry.insert(0, "4000")
         self.max_vert_entry.bind("<KeyRelease>", lambda e: self.update_settings())
         row += 1
 
-        # 3. f выборок (Гц) + кнопка Установить
+        # --- f выборок (Гц) + кнопка Установить ---
         ttk.Label(self.frame_left, text="f выборок (Гц):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
         self.sample_rate_entry = ttk.Entry(self.frame_left)
         self.sample_rate_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
@@ -137,7 +140,7 @@ class SerialPlotter:
         self.sample_rate_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
-        # 4. Период обновления графика (мс) + кнопка Установить
+        # --- Период обновления (мс) + кнопка Установить ---
         ttk.Label(self.frame_left, text="Период обновления (мс):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
         self.post_pause_entry = ttk.Entry(self.frame_left)
         self.post_pause_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
@@ -147,7 +150,7 @@ class SerialPlotter:
         self.post_pause_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
-        # Режим отображения
+        # --- Режим отображения ---
         ttk.Label(self.frame_left, text="Режим отображения:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
         self.plot_mode_cb = ttk.Combobox(self.frame_left,
                                          values=["Линии+точки", "Только линии", "Только точки"],
@@ -157,7 +160,7 @@ class SerialPlotter:
         self.plot_mode_cb.bind("<<ComboboxSelected>>", lambda e: self.update_settings())
         row += 1
 
-        # Ползунок толщины
+        # --- Ползунок толщины ---
         ttk.Label(self.frame_left, text="Толщина линий/точек:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
         self.line_width_scale = tk.Scale(self.frame_left, from_=0.5, to=5.0, resolution=0.5,
                                          orient=tk.HORIZONTAL, variable=self.line_width,
@@ -166,7 +169,7 @@ class SerialPlotter:
         self.line_width_scale.set(1.0)
         row += 1
 
-        # Чекбокс показа сырых данных
+        # --- Чекбокс сырых данных ---
         self.raw_data_var = tk.BooleanVar()
         self.raw_data_cb = ttk.Checkbutton(self.frame_left, text="Показывать сырые данные",
                                           variable=self.raw_data_var,
@@ -174,20 +177,17 @@ class SerialPlotter:
         self.raw_data_cb.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
         row += 1
 
-        # Кнопки управления
-        self.start_stop_button = ttk.Button(self.frame_left, text="Запустить", command=self.toggle_start_stop)
+        # --- Кнопка Start/Stop (приём данных) ---
+        self.start_stop_button = ttk.Button(self.frame_left, text="Start", command=self.toggle_accept, state="disabled")
         self.start_stop_button.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
         row += 1
 
+        # --- Кнопка Очистить график ---
         self.clear_button = ttk.Button(self.frame_left, text="Очистить график", command=self.clear_graph)
         self.clear_button.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
         row += 1
 
-        self.reset_zoom_button = ttk.Button(self.frame_left, text="Сбросить масштаб", command=self.reset_zoom)
-        self.reset_zoom_button.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
-        row += 1
-
-        # Отправка данных
+        # --- Отправка данных ---
         ttk.Label(self.frame_left, text="Отправить данные:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
         self.send_entry = ttk.Entry(self.frame_left)
         self.send_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
@@ -201,146 +201,86 @@ class SerialPlotter:
         self.frame_left.grid_columnconfigure(1, weight=1)
         self.frame_left.grid_rowconfigure(row, weight=1)
 
-    # ---------- Функции отправки команд в порт ----------
-    def send_samples_per_batch(self):
-        """Отправляет команду samplesPerBatch = N"""
-        val = self.samples_entry.get().strip()
-        if not val:
-            return
-        try:
-            n = int(val)
-            if n <= 0:
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("Ошибка", "Введите положительное целое число!")
-            return
-        self.samples_per_batch = n
-        self.update_settings()  # обновить отображение
-        self.send_command(f"samplesPerBatch = {n}")
-
-    def send_sample_rate(self):
-        """Отправляет команду sampleRate = N"""
-        val = self.sample_rate_entry.get().strip()
-        if not val:
-            return
-        try:
-            n = int(val)
-            if n <= 0:
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("Ошибка", "Введите положительное целое число!")
-            return
-        self.sample_rate = n
-        self.update_settings()
-        self.send_command(f"sampleRate = {n}")
-
-    def send_post_pause(self):
-        """Отправляет команду postPause = N"""
-        val = self.post_pause_entry.get().strip()
-        if not val:
-            return
-        try:
-            n = int(val)
-            if n < 0:
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("Ошибка", "Введите неотрицательное целое число!")
-            return
-        self.post_pause = n
-        self.send_command(f"postPause = {n}")
-
-    def send_command(self, cmd):
-        """Общая функция отправки команды в порт"""
-        if not self.serial_port:
-            messagebox.showerror("Ошибка", "COM-порт не выбран!")
-            return
-        if not hasattr(self, 'ser') or not self.ser or not self.ser.is_open:
-            messagebox.showerror("Ошибка", "Порт не открыт!")
-            return
-        try:
-            if not cmd.endswith(('\n', '\r')):
-                cmd += '\r\n'
-            self.ser.write(cmd.encode('utf-8'))
-            self.ser.flush()
-            print(f"Отправлено: {cmd.strip()}")
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка отправки команды: {str(e)}")
-
-    # ---------- Остальные методы (большая часть без изменений) ----------
-    def toggle_raw_data(self):
-        self.show_raw_data = self.raw_data_var.get()
-
-    def update_port_list(self):
+    # ---------- Обновление списка портов (при клике) ----------
+    def update_port_list(self, event=None):
         ports = [port.device for port in serial.tools.list_ports.comports()]
+        current = self.port_list.get()
         self.port_list['values'] = ports
-        if ports:
+        if current in ports:
+            self.port_list.set(current)
+        elif ports:
             self.port_list.set(ports[0])
-
-    def on_port_selected(self, event):
-        self.serial_port = self.port_list.get()
-
-    def toggle_start_stop(self):
-        if self.is_running:
-            self.stop_serial()
         else:
-            self.start_serial()
+            self.port_list.set('')
 
-    def start_serial(self):
-        if not self.serial_port:
+    # ---------- Подключение / отключение от порта ----------
+    def toggle_connect(self):
+        if self.is_connected:
+            self.disconnect()
+        else:
+            self.connect()
+
+    def connect(self):
+        port = self.port_list.get()
+        if not port:
             messagebox.showerror("Ошибка", "Выберите COM-порт!")
             return
-
-        self.update_settings()
-
+        baud = self.baud_list.get()
         try:
-            self.ser = serial.Serial(
-                port=self.serial_port,
-                baudrate=int(self.baud_list.get()),
-                timeout=1,
-                write_timeout=1
-            )
+            self.ser = serial.Serial(port=port, baudrate=int(baud), timeout=1, write_timeout=1)
             sleep(1)
-
-            self.is_running = True
-            self.start_stop_button.config(text="Остановить")
-            self.data = {}
-            self.line_names = []
-            self.lines = {}
-            self.buffer = ""
-            self.data_counter = 0
-            self.user_zoom = False
-            self.clear_graph()
-
+            self.is_connected = True
+            self.connect_btn.config(text="Disconnect")
+            self.serial_port = port
+            # Запускаем поток чтения (он всегда работает, пока порт открыт)
             self.serial_thread = threading.Thread(target=self.read_serial_data, daemon=True)
             self.serial_thread.start()
-
+            # После подключения кнопка Start становится активной
+            self.start_stop_button.config(state="normal")
+            print(f"Подключено к {port}")
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка открытия порта: {str(e)}")
-            if hasattr(self, 'ser') and self.ser:
+            messagebox.showerror("Ошибка", f"Не удалось подключиться: {str(e)}")
+            if self.ser:
                 self.ser.close()
-            self.ser = None
+                self.ser = None
+            self.is_connected = False
 
-    def stop_serial(self):
-        self.is_running = False
-
-        if self._update_id is not None:
-            self.master.after_cancel(self._update_id)
-            self._update_id = None
-
-        if hasattr(self, 'serial_thread') and self.serial_thread:
-            self.serial_thread.join(timeout=1)
-
-        if hasattr(self, 'ser') and self.ser and self.ser.is_open:
+    def disconnect(self):
+        self.is_connected = False
+        self.is_accepting = False
+        self.start_stop_button.config(text="Start")
+        if self.ser and self.ser.is_open:
             try:
                 self.ser.close()
             except:
                 pass
-            self.ser = None
+        self.ser = None
+        self.connect_btn.config(text="Connect")
+        self.start_stop_button.config(state="disabled")
+        print("Отключено от порта")
 
-        self.start_stop_button.config(text="Запустить")
+    # ---------- Управление приёмом данных для графика (Start/Stop) ----------
+    def toggle_accept(self):
+        if not self.is_connected:
+            messagebox.showerror("Ошибка", "Сначала подключитесь к порту!")
+            return
+        if self.is_accepting:
+            self.is_accepting = False
+            self.start_stop_button.config(text="Start")
+            print("Приём данных остановлен")
+        else:
+            # Очищаем старые данные перед стартом
+            self.data.clear()
+            self.line_names.clear()
+            self.lines.clear()
+            self.clear_graph()
+            self.is_accepting = True
+            self.start_stop_button.config(text="Stop")
+            print("Приём данных запущен")
 
+    # ---------- Поток чтения (всегда активен при подключении) ----------
     def read_serial_data(self):
-        while self.is_running and self.ser and self.ser.is_open:
+        while self.is_connected and self.ser and self.ser.is_open:
             try:
                 if self.ser.in_waiting:
                     raw_data = self.ser.read(self.ser.in_waiting)
@@ -362,17 +302,25 @@ class SerialPlotter:
                         print(f"Ошибка декодирования: {e}")
             except serial.SerialException as e:
                 print(f"Ошибка порта: {e}")
-                self.master.after(0, self.stop_serial)
-                self.master.after(0, lambda: messagebox.showerror("Ошибка", f"Ошибка порта: {e}"))
+                self.master.after(0, self.disconnect)
+                messagebox.showerror("Ошибка", f"Ошибка порта: {e}")
                 break
             except Exception as e:
                 print(f"Ошибка: {e}")
-                self.master.after(0, self.stop_serial)
+                self.master.after(0, self.disconnect)
                 break
             sleep(0.001)
 
+    # ---------- Обработка строки (парсер) ----------
     def process_data_line(self, line):
+        # Если приём остановлен – игнорируем любые строки с порта
+        if not self.is_accepting:
+            # Можно закомментировать следующую строку, чтобы не засорять консоль
+            # print(f"[Парсер] Данные игнорируются (приём остановлен): {line}")
+            return
+
         try:
+            # Команды обрабатываются только при активном приёме
             if line.upper() == "|PLOT_RST|":
                 print("[Парсер] Получена команда сброса графика |PLOT_RST|")
                 self.data.clear()
@@ -418,15 +366,14 @@ class SerialPlotter:
                     if name not in self.line_names:
                         self.line_names.append(name)
                 self.data[name].append(value)
-                # Не ограничиваем здесь, ограничим при отрисовке
 
         except Exception as e:
             print(f"[Парсер] Ошибка обработки строки '{line}': {e}")
 
+    # ---------- Завершение кадра ----------
     def finalize_frame(self):
         if not self.data:
             return
-
         self.update_settings()
         self._perform_update(keep_data=True)
         # Очищаем данные для нового кадра
@@ -434,8 +381,66 @@ class SerialPlotter:
         self.line_names.clear()
         self.lines.clear()
 
+    # ---------- Отправка команд (работают всегда, если порт открыт) ----------
+    def send_samples_per_batch(self):
+        val = self.samples_entry.get().strip()
+        if not val:
+            return
+        try:
+            n = int(val)
+            if n <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Ошибка", "Введите положительное целое число!")
+            return
+        self.samples_per_batch = n
+        self.update_settings()
+        self.send_command(f"samplesPerBatch = {n}")
+
+    def send_sample_rate(self):
+        val = self.sample_rate_entry.get().strip()
+        if not val:
+            return
+        try:
+            n = int(val)
+            if n <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Ошибка", "Введите положительное целое число!")
+            return
+        self.sample_rate = n
+        self.update_settings()
+        self.send_command(f"sampleRate = {n}")
+
+    def send_post_pause(self):
+        val = self.post_pause_entry.get().strip()
+        if not val:
+            return
+        try:
+            n = int(val)
+            if n < 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Ошибка", "Введите неотрицательное целое число!")
+            return
+        self.post_pause = n
+        self.send_command(f"postPause = {n}")
+
+    def send_command(self, cmd):
+        if not self.is_connected or not self.ser or not self.ser.is_open:
+            messagebox.showerror("Ошибка", "Порт не подключён!")
+            return
+        try:
+            if not cmd.endswith(('\n', '\r')):
+                cmd += '\r\n'
+            self.ser.write(cmd.encode('utf-8'))
+            self.ser.flush()
+            print(f"Отправлено: {cmd.strip()}")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка отправки: {str(e)}")
+
+    # ---------- Обновление настроек ----------
     def update_settings(self):
-        # Читаем значения из полей (кроме samples_per_batch, sample_rate, post_pause – они устанавливаются кнопками)
         try:
             vert_val = self.max_vert_entry.get().strip()
             if vert_val.lower() == "нет" or vert_val == "":
@@ -447,8 +452,6 @@ class SerialPlotter:
         except ValueError:
             self.max_points_vertical = 4000
 
-        # Применяем текущие значения samples_per_batch, sample_rate, post_pause
-        # (они уже установлены через кнопки, но для надежности читаем из полей)
         try:
             spb = int(self.samples_entry.get())
             self.samples_per_batch = spb if spb > 0 else 500
@@ -467,10 +470,10 @@ class SerialPlotter:
         except:
             self.post_pause = 1000
 
-        if self.data:
+        if self.data and self.is_accepting:
             self._perform_update()
 
-    # ---------- Основной метод отрисовки с пересчетом времени ----------
+    # ---------- Отрисовка ----------
     def _perform_update(self, keep_data=False):
         if not self.data:
             return
@@ -485,7 +488,6 @@ class SerialPlotter:
                 self.lines[name].remove()
                 del self.lines[name]
 
-        # Получаем параметры отображения
         mode = self.plot_mode.get()
         lw = self.line_width.get()
         if mode == "Линии+точки":
@@ -501,29 +503,21 @@ class SerialPlotter:
             marker = 'o'
             markersize = lw * 3
 
-        # Пересчет времени
         samples = self.samples_per_batch
         rate = self.sample_rate
-        # Длительность кадра в мс
-        if rate > 0:
-            total_time_ms = (samples / rate) * 1000
-        else:
-            total_time_ms = samples  # если частота не задана, используем просто номера
+        total_time_ms = (samples / rate) * 1000 if rate > 0 else samples
 
-        # Отрисовка каждой линии
         for name, values in self.data.items():
             if not values:
                 continue
-            # Ограничиваем количество отображаемых точек до samples_per_batch
             display_values = values[-samples:] if samples else values
             n = len(display_values)
             if n == 0:
                 continue
-            # Строим массив времени: от 0 до total_time_ms, равномерно распределенный по точкам
             if n > 1:
                 time_axis = np.linspace(0, total_time_ms, n)
             else:
-                time_axis = [0]  # одна точка
+                time_axis = [0]
 
             if name in self.lines:
                 self.lines[name].set_data(time_axis, display_values)
@@ -537,7 +531,6 @@ class SerialPlotter:
                                      linewidth=lw, markersize=markersize)
                 self.lines[name] = line
 
-        # Легенда
         if self.lines:
             self.ax.legend(fontsize=8)
         else:
@@ -545,21 +538,16 @@ class SerialPlotter:
                 self.ax.legend_.remove()
 
         self.ax.grid(True)
-
-        # Подписи осей
         self.ax.set_xlabel("время (мс)", fontsize=8)
         self.ax.set_ylabel("Значение", fontsize=8)
         self.ax.set_title("Данные с COM-порта", fontsize=9)
 
-        # Устанавливаем пределы
         if not self.user_zoom:
-            # По горизонтали – от 0 до total_time_ms
             if total_time_ms > 0:
                 self.ax.set_xlim(0, total_time_ms)
             else:
                 self.ax.relim()
                 self.ax.autoscale_view()
-            # По вертикали
             if self.max_points_vertical is not None:
                 self.ax.set_ylim(0, self.max_points_vertical)
             else:
@@ -571,7 +559,7 @@ class SerialPlotter:
 
         self.canvas.draw_idle()
 
-    # ---------- Остальные методы без изменений ----------
+    # ---------- Масштабирование колесиком ----------
     def on_scroll(self, event):
         if event.inaxes != self.ax:
             return
@@ -592,11 +580,7 @@ class SerialPlotter:
         self.ax.set_ylim(new_ylim)
         self.canvas.draw_idle()
 
-    def reset_zoom(self):
-        self.user_zoom = False
-        if self.data:
-            self._perform_update()
-
+    # ---------- Очистка графика ----------
     def clear_graph(self):
         self.data.clear()
         self.line_names.clear()
@@ -611,15 +595,13 @@ class SerialPlotter:
         self.ax.set_title("Данные с COM-порта", fontsize=9)
         self.canvas.draw()
 
+    # ---------- Отправка произвольных данных ----------
     def send_data(self):
-        if not self.serial_port:
-            messagebox.showerror("Ошибка", "Выберите COM-порт!")
+        if not self.is_connected or not self.ser or not self.ser.is_open:
+            messagebox.showerror("Ошибка", "Порт не подключён!")
             return
         data = self.send_entry.get().strip()
         if not data:
-            return
-        if not hasattr(self, 'ser') or not self.ser or not self.ser.is_open:
-            messagebox.showerror("Ошибка", "Порт не открыт!")
             return
         try:
             if not data.endswith(('\n', '\r')):
@@ -628,10 +610,12 @@ class SerialPlotter:
             self.ser.flush()
             self.send_entry.delete(0, tk.END)
             print(f"Отправлено: {data.strip()}")
-        except serial.SerialTimeoutException:
-            messagebox.showerror("Ошибка", "Таймаут отправки!")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка отправки: {str(e)}")
+
+    # ---------- Дополнительные методы ----------
+    def toggle_raw_data(self):
+        self.show_raw_data = self.raw_data_var.get()
 
 
 if __name__ == "__main__":
@@ -647,7 +631,7 @@ if __name__ == "__main__":
     app = SerialPlotter(root)
 
     def on_closing():
-        app.stop_serial()
+        app.disconnect()
         root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
