@@ -4,11 +4,11 @@
 // ------------------- НАСТРОЙКИ -------------------
 #define BAUD_RATE 921600
 #define ADC_PIN   ADC1_CHANNEL_7 // 35
-#define MAX_SAMPLES 1000
+#define MAX_SAMPLES 10000
 
 // Переменные (изменяемые)
 uint32_t sampleRate = 1000;
-uint32_t samplesPerBatch = 500;
+uint32_t samplesPerBatch = 1000;
 uint32_t postPause = 1000;
 
 // Буферы (статичные)
@@ -150,7 +150,7 @@ void loop() {
                 Serial.print(sendBuffer[i]);
                 Serial.print("|\r\n");
             }
-            Serial.print("|PLOT_END|\r\n");
+            Serial.print("|PLOT_END|\r\n"); // передача фрейма завершена, плоттер потом будет его рисовать
 
             // Переходим в паузу
             pauseStart = millis();
@@ -159,9 +159,9 @@ void loop() {
 
         case PAUSE:
             if (millis() - pauseStart >= postPause) {
-                // Отправляем команду сброса
+                // После паузы плоттер стирает график
                 Serial.print("|PLOT_RST|\r\n");
-                state = IDLE;   // готовы к новому пакету
+                state = IDLE;  
             }
             break;
 
