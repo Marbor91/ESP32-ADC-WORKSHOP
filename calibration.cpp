@@ -160,6 +160,7 @@ void loop() {
   Serial.println("Calibration finished");
   AwaitEnter();
   for(int i = 0; i < DAC_RES; i++) {PrintData(i*16,RawData[i]);}
+  Serial.print("|PLOT_END|\r\n"); // передача фрейма завершена, плоттер потом будет его рисовать
   
   // Этап 2: Интерполяция
   Serial.println("Main interpolation (256 -> 4096 dotes)");
@@ -185,6 +186,7 @@ void loop() {
     delay(10);
     int raw = analogRead(ADC_PIN);
     PrintData (i*16, (uint16_t)InterpData[raw]);
+    Serial.print("|PLOT_END|\r\n"); // передача фрейма завершена, плоттер потом будет его рисовать
   }
 #else
   // Вывод LUT таблицы

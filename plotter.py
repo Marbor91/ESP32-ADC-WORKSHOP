@@ -49,9 +49,17 @@ class SerialPlotter:
         self._update_id = None
         self.user_zoom = False
 
+        # Переменные для панорамирования (средняя кнопка мыши)
+        self.is_panning = False
+        self.pan_start_x = 0
+        self.pan_start_ydata = 0
+        self.pan_start_xlim = (0, 1)
+        self.pan_start_ylim = (0, 1)
+
         # Параметры отображения
         self.plot_mode = tk.StringVar(value="Линии+точки")
         self.line_width = tk.DoubleVar(value=1.0)
+        self.auto_mode = tk.BooleanVar(value=False)
 
         # Словарь для хранения объектов линий
         self.lines = {}
@@ -68,8 +76,11 @@ class SerialPlotter:
         self.ax.grid(True)
         self.clear_graph()
 
-        # Привязка событий мыши для масштабирования
+        # Привязка событий мыши
         self.canvas.mpl_connect('scroll_event', self.on_scroll)
+        self.canvas.mpl_connect('button_press_event', self.on_press)
+        self.canvas.mpl_connect('button_release_event', self.on_release)
+        self.canvas.mpl_connect('motion_notify_event', self.on_motion)
 
         # Применяем начальные настройки
         self.update_settings()
@@ -169,6 +180,25 @@ class SerialPlotter:
         self.line_width_scale.set(1.0)
         row += 1
 
+        # --- Чекбокс "Авто режим" ---
+        self.auto_cb = ttk.Checkbutton(self.frame_left, text="Авто режим",
+                                       variable=self.auto_mode,
+                                       command=self.toggle_auto_mode)
+        self.auto_cb.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
+        row += 1
+
+        # --- Кнопка "Авто масштаб" (доступна только в авто режиме) ---
+        self.auto_scale_btn = ttk.Button(self.frame_left, text="Авто масштаб", 
+                                         command=self.reset_zoom, state="disabled")
+        self.auto_scale_btn.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
+        row += 1
+
+        # --- Кнопка "Next step" ---
+        self.next_step_btn = ttk.Button(self.frame_left, text="Next step", 
+                                        command=self.send_next_step)
+        self.next_step_btn.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
+        row += 1
+
         # --- Чекбокс сырых данных ---
         self.raw_data_var = tk.BooleanVar()
         self.raw_data_cb = ttk.Checkbutton(self.frame_left, text="Показывать сырые данные",
@@ -201,6 +231,29 @@ class SerialPlotter:
         self.frame_left.grid_columnconfigure(1, weight=1)
         self.frame_left.grid_rowconfigure(row, weight=1)
 
+        # Изначально блокируем/разблокируем в зависимости от авто режима
+        self.toggle_auto_mode()
+
+    # ---------- Обработка авто режима ----------
+    def toggle_auto_mode(self):
+        auto = self.auto_mode.get()
+        widgets = [
+            self.samples_entry, self.samples_btn,
+            self.max_vert_entry,
+            self.sample_rate_entry, self.sample_rate_btn,
+            self.post_pause_entry, self.post_pause_btn
+        ]
+        state = "disabled" if auto else "normal"
+        for w in widgets:
+            w.config(state=state)
+        self.auto_scale_btn.config(state="normal" if auto else "disabled")
+        if self.data and self.is_accepting:
+            self._perform_update()
+
+    # ---------- Отправка "Next step" ----------
+    def send_next_step(self):
+        self.send_command("1")
+
     # ---------- Обновление списка портов (при клике) ----------
     def update_port_list(self, event=None):
         ports = [port.device for port in serial.tools.list_ports.comports()]
@@ -232,10 +285,8 @@ class SerialPlotter:
             self.is_connected = True
             self.connect_btn.config(text="Disconnect")
             self.serial_port = port
-            # Запускаем поток чтения (он всегда работает, пока порт открыт)
             self.serial_thread = threading.Thread(target=self.read_serial_data, daemon=True)
             self.serial_thread.start()
-            # После подключения кнопка Start становится активной
             self.start_stop_button.config(state="normal")
             print(f"Подключено к {port}")
         except Exception as e:
@@ -269,7 +320,6 @@ class SerialPlotter:
             self.start_stop_button.config(text="Start")
             print("Приём данных остановлен")
         else:
-            # Очищаем старые данные перед стартом
             self.data.clear()
             self.line_names.clear()
             self.lines.clear()
@@ -290,6 +340,11 @@ class SerialPlotter:
                             cleaned = re.sub(r'[\r\n]+', ' ', decoded)
                             print(f"[Данные {self.data_counter}]: {cleaned.strip()}")
                             self.data_counter += 1
+                        else:
+                            lines = decoded.splitlines()
+                            for line in lines:
+                                if line.strip() and '|' not in line:
+                                    print(f"[Сообщение] {line.strip()}")
                         self.buffer += decoded
                         while '\n' in self.buffer or '\r' in self.buffer:
                             line, sep, self.buffer = self.buffer.partition('\n')
@@ -313,14 +368,10 @@ class SerialPlotter:
 
     # ---------- Обработка строки (парсер) ----------
     def process_data_line(self, line):
-        # Если приём остановлен – игнорируем любые строки с порта
         if not self.is_accepting:
-            # Можно закомментировать следующую строку, чтобы не засорять консоль
-            # print(f"[Парсер] Данные игнорируются (приём остановлен): {line}")
             return
 
         try:
-            # Команды обрабатываются только при активном приёме
             if line.upper() == "|PLOT_RST|":
                 print("[Парсер] Получена команда сброса графика |PLOT_RST|")
                 self.data.clear()
@@ -376,7 +427,6 @@ class SerialPlotter:
             return
         self.update_settings()
         self._perform_update(keep_data=True)
-        # Очищаем данные для нового кадра
         self.data.clear()
         self.line_names.clear()
         self.lines.clear()
@@ -441,34 +491,38 @@ class SerialPlotter:
 
     # ---------- Обновление настроек ----------
     def update_settings(self):
-        try:
-            vert_val = self.max_vert_entry.get().strip()
-            if vert_val.lower() == "нет" or vert_val == "":
-                self.max_points_vertical = None
-            else:
-                self.max_points_vertical = float(vert_val)
-                if self.max_points_vertical < 0:
+        if not self.auto_mode.get():
+            try:
+                vert_val = self.max_vert_entry.get().strip()
+                if vert_val.lower() == "нет" or vert_val == "":
                     self.max_points_vertical = None
-        except ValueError:
-            self.max_points_vertical = 4000
+                else:
+                    self.max_points_vertical = float(vert_val)
+                    if self.max_points_vertical < 0:
+                        self.max_points_vertical = None
+            except ValueError:
+                self.max_points_vertical = 4000
 
-        try:
-            spb = int(self.samples_entry.get())
-            self.samples_per_batch = spb if spb > 0 else 500
-        except:
+            try:
+                spb = int(self.samples_entry.get())
+                self.samples_per_batch = spb if spb > 0 else 500
+            except:
+                self.samples_per_batch = 500
+
+            try:
+                sr = int(self.sample_rate_entry.get())
+                self.sample_rate = sr if sr > 0 else 1000
+            except:
+                self.sample_rate = 1000
+
+            try:
+                pp = int(self.post_pause_entry.get())
+                self.post_pause = pp if pp >= 0 else 1000
+            except:
+                self.post_pause = 1000
+        else:
+            self.max_points_vertical = None
             self.samples_per_batch = 500
-
-        try:
-            sr = int(self.sample_rate_entry.get())
-            self.sample_rate = sr if sr > 0 else 1000
-        except:
-            self.sample_rate = 1000
-
-        try:
-            pp = int(self.post_pause_entry.get())
-            self.post_pause = pp if pp >= 0 else 1000
-        except:
-            self.post_pause = 1000
 
         if self.data and self.is_accepting:
             self._perform_update()
@@ -482,7 +536,6 @@ class SerialPlotter:
             xlim = self.ax.get_xlim()
             ylim = self.ax.get_ylim()
 
-        # Удаляем линии для отсутствующих имён
         for name in list(self.lines.keys()):
             if name not in self.data or not self.data[name]:
                 self.lines[name].remove()
@@ -498,35 +551,43 @@ class SerialPlotter:
             linestyle = '-'
             marker = ''
             markersize = 0
-        else:  # "Только точки"
+        else:
             linestyle = 'none'
             marker = 'o'
             markersize = lw * 3
 
-        samples = self.samples_per_batch
-        rate = self.sample_rate
-        total_time_ms = (samples / rate) * 1000 if rate > 0 else samples
+        auto = self.auto_mode.get()
 
         for name, values in self.data.items():
             if not values:
                 continue
-            display_values = values[-samples:] if samples else values
+            if auto:
+                display_values = values
+            else:
+                display_values = values[-self.samples_per_batch:] if self.samples_per_batch else values
+
             n = len(display_values)
             if n == 0:
                 continue
-            if n > 1:
-                time_axis = np.linspace(0, total_time_ms, n)
+
+            if auto:
+                x_axis = range(n)
             else:
-                time_axis = [0]
+                rate = self.sample_rate
+                total_time_ms = (self.samples_per_batch / rate) * 1000 if rate > 0 else self.samples_per_batch
+                if n > 1:
+                    x_axis = np.linspace(0, total_time_ms, n)
+                else:
+                    x_axis = [0]
 
             if name in self.lines:
-                self.lines[name].set_data(time_axis, display_values)
+                self.lines[name].set_data(x_axis, display_values)
                 self.lines[name].set_linestyle(linestyle)
                 self.lines[name].set_marker(marker)
                 self.lines[name].set_linewidth(lw)
                 self.lines[name].set_markersize(markersize)
             else:
-                line, = self.ax.plot(time_axis, display_values, label=name,
+                line, = self.ax.plot(x_axis, display_values, label=name,
                                      linestyle=linestyle, marker=marker,
                                      linewidth=lw, markersize=markersize)
                 self.lines[name] = line
@@ -538,26 +599,73 @@ class SerialPlotter:
                 self.ax.legend_.remove()
 
         self.ax.grid(True)
-        self.ax.set_xlabel("время (мс)", fontsize=8)
+
+        if auto:
+            self.ax.set_xlabel("Номер точки", fontsize=8)
+        else:
+            self.ax.set_xlabel("время (мс)", fontsize=8)
         self.ax.set_ylabel("Значение", fontsize=8)
         self.ax.set_title("Данные с COM-порта", fontsize=9)
 
         if not self.user_zoom:
-            if total_time_ms > 0:
-                self.ax.set_xlim(0, total_time_ms)
-            else:
+            if auto:
                 self.ax.relim()
                 self.ax.autoscale_view()
-            if self.max_points_vertical is not None:
-                self.ax.set_ylim(0, self.max_points_vertical)
             else:
-                self.ax.relim()
-                self.ax.autoscale_view()
+                rate = self.sample_rate
+                total_time_ms = (self.samples_per_batch / rate) * 1000 if rate > 0 else self.samples_per_batch
+                if total_time_ms > 0:
+                    self.ax.set_xlim(0, total_time_ms)
+                else:
+                    self.ax.relim()
+                    self.ax.autoscale_view()
+                if self.max_points_vertical is not None:
+                    self.ax.set_ylim(0, self.max_points_vertical)
+                else:
+                    self.ax.relim()
+                    self.ax.autoscale_view()
         else:
             self.ax.set_xlim(xlim)
             self.ax.set_ylim(ylim)
 
         self.canvas.draw_idle()
+
+    # ---------- Сброс масштаба (Авто масштаб) ----------
+    def reset_zoom(self):
+        """Сбрасывает пользовательский зум и применяет автоматическое масштабирование к текущему графику."""
+        self.user_zoom = False
+        # Перерисовываем график с автоматическими пределами
+        if self.data and self.is_accepting:
+            self._perform_update()
+        else:
+            # Если данных нет, просто сбрасываем масштаб пустого графика
+            self.ax.relim()
+            self.ax.autoscale_view()
+            self.canvas.draw_idle()
+
+    # ---------- Панорамирование (средняя кнопка мыши) ----------
+    def on_press(self, event):
+        if event.button == 2:  # средняя кнопка
+            if event.xdata is not None and event.ydata is not None:
+                self.is_panning = True
+                self.pan_start_x = event.xdata
+                self.pan_start_ydata = event.ydata
+                self.pan_start_xlim = self.ax.get_xlim()
+                self.pan_start_ylim = self.ax.get_ylim()
+
+    def on_release(self, event):
+        if event.button == 2:
+            self.is_panning = False
+
+    def on_motion(self, event):
+        if self.is_panning and event.xdata is not None and event.ydata is not None:
+            dx = event.xdata - self.pan_start_x
+            dy = event.ydata - self.pan_start_ydata
+            new_xlim = [self.pan_start_xlim[0] - dx, self.pan_start_xlim[1] - dx]
+            new_ylim = [self.pan_start_ylim[0] - dy, self.pan_start_ylim[1] - dy]
+            self.ax.set_xlim(new_xlim)
+            self.ax.set_ylim(new_ylim)
+            self.canvas.draw_idle()
 
     # ---------- Масштабирование колесиком ----------
     def on_scroll(self, event):
@@ -590,7 +698,7 @@ class SerialPlotter:
         self.user_zoom = False
         self.ax.clear()
         self.ax.grid(True)
-        self.ax.set_xlabel("время (мс)", fontsize=8)
+        self.ax.set_xlabel("Номер точки", fontsize=8)
         self.ax.set_ylabel("Значение", fontsize=8)
         self.ax.set_title("Данные с COM-порта", fontsize=9)
         self.canvas.draw()
