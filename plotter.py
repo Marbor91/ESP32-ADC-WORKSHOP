@@ -17,25 +17,24 @@ class SerialPlotter:
         self.master = master
         master.title("График данных с COM-порта")
 
-        # Проверка прав администратора (только Windows)
         if os.name == 'nt' and not ctypes.windll.shell32.IsUserAnAdmin():
             messagebox.showerror("Ошибка", "Запустите программу от имени администратора!")
             sys.exit(1)
 
-        # Оптимизация графики для ускорения
+        # Оптимизация
         plt.rcParams['path.simplify'] = True
         plt.rcParams['path.simplify_threshold'] = 1.0
         plt.rcParams['lines.antialiased'] = False
         plt.rcParams['backend'] = 'TkAgg'
         plt.rcParams['figure.dpi'] = 80
 
-        # ---------- Параметры настройки ----------
+        # Параметры
         self.samples_per_batch = 500
         self.max_points_vertical = 4000
         self.sample_rate = 1000
         self.post_pause = 1000
 
-        # Переменные состояния
+        # Состояния
         self.is_connected = False
         self.is_accepting = False
         self.serial_port = None
@@ -49,7 +48,7 @@ class SerialPlotter:
         self._update_id = None
         self.user_zoom = False
 
-        # Переменные для панорамирования (средняя кнопка мыши)
+        # Панорамирование
         self.is_panning = False
         self.pan_start_x = 0
         self.pan_start_ydata = 0
@@ -61,13 +60,10 @@ class SerialPlotter:
         self.line_width = tk.DoubleVar(value=1.0)
         self.auto_mode = tk.BooleanVar(value=False)
 
-        # Словарь для хранения объектов линий
         self.lines = {}
 
-        # Создание интерфейса
         self.create_widgets()
 
-        # Инициализация графика
         self.figure, self.ax = plt.subplots(figsize=(8, 4), dpi=80)
         self.figure.set_facecolor('#f0f0f0')
         self.ax.set_facecolor('#f0f0f0')
@@ -76,16 +72,13 @@ class SerialPlotter:
         self.ax.grid(True)
         self.clear_graph()
 
-        # Привязка событий мыши
         self.canvas.mpl_connect('scroll_event', self.on_scroll)
         self.canvas.mpl_connect('button_press_event', self.on_press)
         self.canvas.mpl_connect('button_release_event', self.on_release)
         self.canvas.mpl_connect('motion_notify_event', self.on_motion)
 
-        # Применяем начальные настройки
         self.update_settings()
 
-    # ---------- Создание виджетов интерфейса ----------
     def create_widgets(self):
         self.master.grid_columnconfigure(0, weight=0, minsize=250)
         self.master.grid_columnconfigure(1, weight=1)
@@ -93,7 +86,6 @@ class SerialPlotter:
 
         self.frame_left = ttk.Frame(self.master, padding="5")
         self.frame_left.grid(row=0, column=0, sticky=tk.N+tk.S+tk.W+tk.E)
-
         self.frame_right = ttk.Frame(self.master)
         self.frame_right.grid(row=0, column=1, sticky=tk.N+tk.S+tk.E+tk.W)
 
@@ -101,69 +93,51 @@ class SerialPlotter:
         style.configure('TButton', padding=5)
         style.configure('TCheckbutton', padding=5)
 
-        row = 0
+        # ---- Группа 1: Порт и связь ----
+        group1 = ttk.LabelFrame(self.frame_left, text="Порт и связь", padding="5")
+        group1.pack(fill=tk.X, pady=2)
 
-        # --- COM-порт + кнопка Connect ---
-        ttk.Label(self.frame_left, text="COM-порт:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-        self.port_list = ttk.Combobox(self.frame_left, state="readonly")
+        row = 0
+        ttk.Label(group1, text="COM-порт:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.port_list = ttk.Combobox(group1, state="readonly")
         self.port_list.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
         self.port_list.bind("<Button-1>", self.update_port_list)
         self.update_port_list()
-
-        self.connect_btn = ttk.Button(self.frame_left, text="Connect", command=self.toggle_connect)
+        self.connect_btn = ttk.Button(group1, text="Connect", command=self.toggle_connect)
         self.connect_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
-        # --- Скорость порта (дефолт 921600) ---
-        ttk.Label(self.frame_left, text="Скорость (бод):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-        self.baud_list = ttk.Combobox(self.frame_left,
+        ttk.Label(group1, text="Скорость (бод):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.baud_list = ttk.Combobox(group1,
                                     values=[9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000, 4000000],
                                     state="readonly")
         self.baud_list.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
         self.baud_list.set(921600)
         row += 1
 
-        # --- Выборок на кадр + кнопка Установить ---
-        ttk.Label(self.frame_left, text="Выборок на кадр:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-        self.samples_entry = ttk.Entry(self.frame_left)
-        self.samples_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
-        self.samples_entry.insert(0, "500")
-        self.samples_btn = ttk.Button(self.frame_left, text="Установить", 
-                                      command=self.send_samples_per_batch)
-        self.samples_btn.grid(row=row, column=2, padx=5, pady=5)
+        ttk.Label(group1, text="Отправить:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.send_entry = ttk.Entry(group1)
+        self.send_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.send_entry.bind("<Return>", lambda event: self.send_data())
+        self.send_btn = ttk.Button(group1, text="Отправить", command=self.send_data)
+        self.send_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
-        # --- Макс значение на графике ---
-        ttk.Label(self.frame_left, text="Макс значение на графике:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-        self.max_vert_entry = ttk.Entry(self.frame_left)
-        self.max_vert_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
-        self.max_vert_entry.insert(0, "4000")
-        self.max_vert_entry.bind("<KeyRelease>", lambda e: self.update_settings())
+        self.raw_data_var = tk.BooleanVar()
+        self.raw_data_cb = ttk.Checkbutton(group1, text="Показывать сырые данные",
+                                          variable=self.raw_data_var,
+                                          command=self.toggle_raw_data)
+        self.raw_data_cb.grid(row=row, column=0, columnspan=3, padx=5, pady=5, sticky=tk.W)
         row += 1
+        group1.grid_columnconfigure(1, weight=1)
 
-        # --- f выборок (Гц) + кнопка Установить ---
-        ttk.Label(self.frame_left, text="f выборок (Гц):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-        self.sample_rate_entry = ttk.Entry(self.frame_left)
-        self.sample_rate_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
-        self.sample_rate_entry.insert(0, "1000")
-        self.sample_rate_btn = ttk.Button(self.frame_left, text="Установить",
-                                          command=self.send_sample_rate)
-        self.sample_rate_btn.grid(row=row, column=2, padx=5, pady=5)
-        row += 1
+        # ---- Группа 2: Настройки отображения ----
+        group2 = ttk.LabelFrame(self.frame_left, text="Настройки отображения", padding="5")
+        group2.pack(fill=tk.X, pady=2)
 
-        # --- Период обновления (мс) + кнопка Установить ---
-        ttk.Label(self.frame_left, text="Период обновления (мс):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-        self.post_pause_entry = ttk.Entry(self.frame_left)
-        self.post_pause_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
-        self.post_pause_entry.insert(0, "1000")
-        self.post_pause_btn = ttk.Button(self.frame_left, text="Установить",
-                                         command=self.send_post_pause)
-        self.post_pause_btn.grid(row=row, column=2, padx=5, pady=5)
-        row += 1
-
-        # --- Режим отображения ---
-        ttk.Label(self.frame_left, text="Режим отображения:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-        self.plot_mode_cb = ttk.Combobox(self.frame_left,
+        row = 0
+        ttk.Label(group2, text="Режим отображения:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.plot_mode_cb = ttk.Combobox(group2,
                                          values=["Линии+точки", "Только линии", "Только точки"],
                                          state="readonly",
                                          textvariable=self.plot_mode)
@@ -171,83 +145,196 @@ class SerialPlotter:
         self.plot_mode_cb.bind("<<ComboboxSelected>>", lambda e: self.update_settings())
         row += 1
 
-        # --- Ползунок толщины ---
-        ttk.Label(self.frame_left, text="Толщина линий/точек:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-        self.line_width_scale = tk.Scale(self.frame_left, from_=0.5, to=5.0, resolution=0.5,
+        ttk.Label(group2, text="Толщина линий/точек:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.line_width_scale = tk.Scale(group2, from_=0.5, to=5.0, resolution=0.5,
                                          orient=tk.HORIZONTAL, variable=self.line_width,
                                          command=lambda e: self.update_settings())
         self.line_width_scale.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
         self.line_width_scale.set(1.0)
         row += 1
 
-        # --- Чекбокс "Авто режим" ---
-        self.auto_cb = ttk.Checkbutton(self.frame_left, text="Авто режим",
+        ttk.Label(group2, text="Макс значение на графике:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.max_vert_entry = ttk.Entry(group2)
+        self.max_vert_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.max_vert_entry.insert(0, "4000")
+        self.max_vert_entry.bind("<KeyRelease>", lambda e: self.update_settings())
+        row += 1
+
+        self.auto_cb = ttk.Checkbutton(group2, text="Авто режим",
                                        variable=self.auto_mode,
                                        command=self.toggle_auto_mode)
         self.auto_cb.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
         row += 1
 
-        # --- Кнопка "Next step" ---
-        self.next_step_btn = ttk.Button(self.frame_left, text="Next step", 
-                                        command=self.send_next_step)
-        self.next_step_btn.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
-        row += 1
-
-        # --- Чекбокс сырых данных ---
-        self.raw_data_var = tk.BooleanVar()
-        self.raw_data_cb = ttk.Checkbutton(self.frame_left, text="Показывать сырые данные",
-                                          variable=self.raw_data_var,
-                                          command=self.toggle_raw_data)
-        self.raw_data_cb.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
-        row += 1
-
-        # --- Кнопка Start/Stop (приём данных) ---
-        self.start_stop_button = ttk.Button(self.frame_left, text="Start", command=self.toggle_accept, state="disabled")
+        self.start_stop_button = ttk.Button(group2, text="Start", command=self.toggle_accept, state="disabled")
         self.start_stop_button.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
         row += 1
 
-        # --- Кнопка Очистить график ---
-        self.clear_button = ttk.Button(self.frame_left, text="Очистить график", command=self.clear_graph)
+        self.clear_button = ttk.Button(group2, text="Очистить график", command=self.clear_graph)
         self.clear_button.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
         row += 1
+        group2.grid_columnconfigure(1, weight=1)
 
-        # --- Отправка данных ---
-        ttk.Label(self.frame_left, text="Отправить данные:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
-        self.send_entry = ttk.Entry(self.frame_left)
-        self.send_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
-        self.send_entry.bind("<Return>", lambda event: self.send_data())
+        # ---- Группа 3: Управление устройством ----
+        group3 = ttk.LabelFrame(self.frame_left, text="Управление устройством", padding="5")
+        group3.pack(fill=tk.X, pady=2)
+
+        row = 0
+        ttk.Label(group3, text="Период обновления (мс):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.post_pause_entry = ttk.Entry(group3)
+        self.post_pause_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.post_pause_entry.insert(0, "1000")
+        self.post_pause_btn = ttk.Button(group3, text="Установить", command=self.send_post_pause)
+        self.post_pause_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
-        self.send_button = ttk.Button(self.frame_left, text="Отправить", command=self.send_data)
-        self.send_button.grid(row=row, column=0, columnspan=2, padx=5, pady=5, sticky=tk.EW)
+        ttk.Label(group3, text="Выборок на кадр:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.samples_entry = ttk.Entry(group3)
+        self.samples_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.samples_entry.insert(0, "500")
+        self.samples_btn = ttk.Button(group3, text="Установить", command=self.send_samples_per_batch)
+        self.samples_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
-        self.frame_left.grid_columnconfigure(1, weight=1)
-        self.frame_left.grid_rowconfigure(row, weight=1)
+        ttk.Label(group3, text="f выборок (Гц):").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.sample_rate_entry = ttk.Entry(group3)
+        self.sample_rate_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.sample_rate_entry.insert(0, "1000")
+        self.sample_rate_btn = ttk.Button(group3, text="Установить", command=self.send_sample_rate)
+        self.sample_rate_btn.grid(row=row, column=2, padx=5, pady=5)
+        row += 1
 
-        # Изначально блокируем/разблокируем в зависимости от авто режима
+        ttk.Separator(group3, orient='horizontal').grid(row=row, column=0, columnspan=3, sticky=tk.EW, pady=5)
+        row += 1
+
+        # ---- Выпадающий список для фильтров ----
+        ttk.Label(group3, text="Фильтр:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.filter_var = tk.StringVar(value="нет фильтра")
+        self.filter_combo = ttk.Combobox(group3, state="readonly",
+                                         values=["нет фильтра", "EMA", "AVG", "MED"],
+                                         textvariable=self.filter_var)
+        self.filter_combo.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.filter_combo.bind("<<ComboboxSelected>>", self.on_filter_changed)
+        row += 1
+
+        # Поле для ввода параметра фильтра и кнопка "Установить"
+        self.filter_label = ttk.Label(group3, text="Параметр:")
+        self.filter_label.grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.filter_entry = ttk.Entry(group3)
+        self.filter_entry.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.filter_entry.insert(0, "0.1")
+        self.filter_btn = ttk.Button(group3, text="Установить", command=self.filter_apply)
+        self.filter_btn.grid(row=row, column=2, padx=5, pady=5)
+        row += 1
+
+        ttk.Separator(group3, orient='horizontal').grid(row=row, column=0, columnspan=3, sticky=tk.EW, pady=5)
+        row += 1
+
+        # ---- Выпадающий список для калибровки ----
+        ttk.Label(group3, text="Калибровка:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.cal_var = tk.StringVar(value="нет")
+        self.cal_combo = ttk.Combobox(group3, state="readonly",
+                                      values=["нет", "вкл", "вкл имитация помех"],
+                                      textvariable=self.cal_var)
+        self.cal_combo.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.cal_combo.bind("<<ComboboxSelected>>", self.on_cal_changed)
+        row += 1
+
+        ttk.Separator(group3, orient='horizontal').grid(row=row, column=0, columnspan=3, sticky=tk.EW, pady=5)
+        row += 1
+
+        # ---- Выпадающий список для типа вывода ----
+        ttk.Label(group3, text="Тип вывода:").grid(row=row, column=0, sticky=tk.W, padx=5, pady=5)
+        self.out_var = tk.StringVar(value="N")
+        self.out_combo = ttk.Combobox(group3, state="readonly",
+                                      values=["mV", "N"],
+                                      textvariable=self.out_var)
+        self.out_combo.grid(row=row, column=1, sticky=tk.EW, padx=5, pady=5)
+        self.out_combo.bind("<<ComboboxSelected>>", self.on_out_changed)
+        row += 1
+
+        group3.grid_columnconfigure(1, weight=1)
+
+        self.frame_left.grid_rowconfigure(10, weight=1)
+
         self.toggle_auto_mode()
+        self.update_filter_state()
 
-    # ---------- Обработка авто режима ----------
-    def toggle_auto_mode(self):
-        auto = self.auto_mode.get()
-        widgets = [
-            self.samples_entry, self.samples_btn,
-            self.max_vert_entry,
-            self.sample_rate_entry, self.sample_rate_btn,
-            self.post_pause_entry, self.post_pause_btn
-        ]
-        state = "disabled" if auto else "normal"
-        for w in widgets:
-            w.config(state=state)
-        if self.data and self.is_accepting:
-            self._perform_update()
+    # ---------- Обработчики выпадающих списков ----------
+    def on_filter_changed(self, event=None):
+        self.update_filter_state()
 
-    # ---------- Отправка "Next step" ----------
-    def send_next_step(self):
-        self.send_command("1")
+    def update_filter_state(self):
+        filter_type = self.filter_var.get()
+        if filter_type == "нет фильтра":
+            self.filter_entry.config(state="disabled")
+            self.filter_label.config(text="Параметр:")
+            self.filter_entry.delete(0, tk.END)
+            self.filter_entry.insert(0, "")
+        elif filter_type == "EMA":
+            self.filter_entry.config(state="normal")
+            self.filter_label.config(text="alfa coef:")
+            if not self.filter_entry.get():
+                self.filter_entry.insert(0, "0.1")
+        elif filter_type == "AVG":
+            self.filter_entry.config(state="normal")
+            self.filter_label.config(text="samples:")
+            if not self.filter_entry.get():
+                self.filter_entry.insert(0, "5")
+        elif filter_type == "MED":
+            self.filter_entry.config(state="disabled")
+            self.filter_label.config(text="Параметр:")
+            self.filter_entry.delete(0, tk.END)
+            self.filter_entry.insert(0, "3")
 
-    # ---------- Обновление списка портов (при клике) ----------
+    def filter_apply(self):
+        filter_type = self.filter_var.get()
+        if filter_type == "нет фильтра":
+            self.send_command("Filter = 0")
+        elif filter_type == "EMA":
+            val = self.filter_entry.get().strip()
+            try:
+                alpha = float(val)
+                if not (0 < alpha < 1):
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("Ошибка", "Введите число от 0 до 1 (например, 0.1)")
+                return
+            self.send_command("Filter = 1")
+            self.send_command(f"EMA alpha = {alpha}")
+        elif filter_type == "AVG":
+            val = self.filter_entry.get().strip()
+            try:
+                n = int(val)
+                if n <= 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("Ошибка", "Введите положительное целое число")
+                return
+            self.send_command("Filter = 3")
+            self.send_command(f"AVG coef = {n}")
+        elif filter_type == "MED":
+            self.send_command("Filter = 2")
+        else:
+            return
+
+    def on_cal_changed(self, event=None):
+        cal = self.cal_var.get()
+        if cal == "нет":
+            self.send_command("Calibration = 0")
+        elif cal == "вкл":
+            self.send_command("Calibration = 1")
+        elif cal == "вкл имитация помех":
+            self.send_command("Calibration = 2")
+
+    def on_out_changed(self, event=None):
+        out = self.out_var.get()
+        if out == "mV":
+            self.send_command("OUT = V")
+        else:  # "N"
+            self.send_command("OUT = N")
+
+    # ---------- Остальные методы без изменений ----------
     def update_port_list(self, event=None):
         ports = [port.device for port in serial.tools.list_ports.comports()]
         current = self.port_list.get()
@@ -259,7 +346,6 @@ class SerialPlotter:
         else:
             self.port_list.set('')
 
-    # ---------- Подключение / отключение от порта ----------
     def toggle_connect(self):
         if self.is_connected:
             self.disconnect()
@@ -303,7 +389,6 @@ class SerialPlotter:
         self.start_stop_button.config(state="disabled")
         print("Отключено от порта")
 
-    # ---------- Управление приёмом данных для графика (Start/Stop) ----------
     def toggle_accept(self):
         if not self.is_connected:
             messagebox.showerror("Ошибка", "Сначала подключитесь к порту!")
@@ -321,7 +406,6 @@ class SerialPlotter:
             self.start_stop_button.config(text="Stop")
             print("Приём данных запущен")
 
-    # ---------- Поток чтения (всегда активен при подключении) ----------
     def read_serial_data(self):
         while self.is_connected and self.ser and self.ser.is_open:
             try:
@@ -359,38 +443,29 @@ class SerialPlotter:
                 break
             sleep(0.001)
 
-    # ---------- Обработка строки (парсер) ----------
     def process_data_line(self, line):
         if not self.is_accepting:
             return
-
         try:
             if line.upper() == "|PLOT_RST|":
-                print("[Парсер] Получена команда сброса графика |PLOT_RST|")
+                print("[Парсер] |PLOT_RST|")
                 self.data.clear()
                 self.line_names.clear()
                 self.lines.clear()
                 self.user_zoom = False
                 self.master.after(0, self.clear_graph)
                 return
-
             if line.upper() == "|PLOT_END|":
-                print("[Парсер] Получена команда |PLOT_END| – отрисовка кадра")
+                print("[Парсер] |PLOT_END|")
                 self.master.after(0, self.finalize_frame)
                 return
-
             if '|' not in line or '=' not in line:
                 return
-
             match = re.search(r'\|(.*?)\|', line)
             if not match:
                 return
-
             inner = match.group(1).strip()
             parts = inner.split(',')
-            if len(parts) < 1:
-                return
-
             for part in parts:
                 part = part.strip()
                 if '=' not in part:
@@ -404,17 +479,14 @@ class SerialPlotter:
                     value = float(val_str)
                 except ValueError:
                     continue
-
                 if name not in self.data:
                     self.data[name] = []
                     if name not in self.line_names:
                         self.line_names.append(name)
                 self.data[name].append(value)
-
         except Exception as e:
-            print(f"[Парсер] Ошибка обработки строки '{line}': {e}")
+            print(f"[Парсер] Ошибка: {e}")
 
-    # ---------- Завершение кадра ----------
     def finalize_frame(self):
         if not self.data:
             return
@@ -424,11 +496,8 @@ class SerialPlotter:
         self.line_names.clear()
         self.lines.clear()
 
-    # ---------- Отправка команд (работают всегда, если порт открыт) ----------
     def send_samples_per_batch(self):
         val = self.samples_entry.get().strip()
-        if not val:
-            return
         try:
             n = int(val)
             if n <= 0:
@@ -442,8 +511,6 @@ class SerialPlotter:
 
     def send_sample_rate(self):
         val = self.sample_rate_entry.get().strip()
-        if not val:
-            return
         try:
             n = int(val)
             if n <= 0:
@@ -457,8 +524,6 @@ class SerialPlotter:
 
     def send_post_pause(self):
         val = self.post_pause_entry.get().strip()
-        if not val:
-            return
         try:
             n = int(val)
             if n < 0:
@@ -482,7 +547,6 @@ class SerialPlotter:
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка отправки: {str(e)}")
 
-    # ---------- Обновление настроек ----------
     def update_settings(self):
         if not self.auto_mode.get():
             try:
@@ -520,7 +584,6 @@ class SerialPlotter:
         if self.data and self.is_accepting:
             self._perform_update()
 
-    # ---------- Отрисовка ----------
     def _perform_update(self, keep_data=False):
         if not self.data:
             return
@@ -623,32 +686,7 @@ class SerialPlotter:
 
         self.canvas.draw_idle()
 
-    # ---------- Панорамирование (средняя кнопка мыши) ----------
-    def on_press(self, event):
-        if event.button == 2:  # средняя кнопка
-            if event.xdata is not None and event.ydata is not None:
-                self.is_panning = True
-                self.pan_start_x = event.xdata
-                self.pan_start_ydata = event.ydata
-                self.pan_start_xlim = self.ax.get_xlim()
-                self.pan_start_ylim = self.ax.get_ylim()
-
-    def on_release(self, event):
-        if event.button == 2:
-            self.is_panning = False
-
-    def on_motion(self, event):
-        if self.is_panning and event.xdata is not None and event.ydata is not None:
-            # Увеличиваем чувствительность в 2 раза и добавляем плавность
-            dx = (event.xdata - self.pan_start_x) * 1.2
-            dy = (event.ydata - self.pan_start_ydata) * 1.2
-            new_xlim = [self.pan_start_xlim[0] - dx, self.pan_start_xlim[1] - dx]
-            new_ylim = [self.pan_start_ylim[0] - dy, self.pan_start_ylim[1] - dy]
-            self.ax.set_xlim(new_xlim)
-            self.ax.set_ylim(new_ylim)
-            self.canvas.draw_idle()
-
-    # ---------- Масштабирование колесиком ----------
+    # ---------- Панорамирование и зум ----------
     def on_scroll(self, event):
         if event.inaxes != self.ax:
             return
@@ -669,7 +707,29 @@ class SerialPlotter:
         self.ax.set_ylim(new_ylim)
         self.canvas.draw_idle()
 
-    # ---------- Очистка графика ----------
+    def on_press(self, event):
+        if event.button == 2 and event.xdata is not None and event.ydata is not None:
+            self.is_panning = True
+            self.pan_start_x = event.xdata
+            self.pan_start_ydata = event.ydata
+            self.pan_start_xlim = self.ax.get_xlim()
+            self.pan_start_ylim = self.ax.get_ylim()
+
+    def on_release(self, event):
+        if event.button == 2:
+            self.is_panning = False
+
+    def on_motion(self, event):
+        if self.is_panning and event.xdata is not None and event.ydata is not None:
+            dx = event.xdata - self.pan_start_x
+            dy = event.ydata - self.pan_start_ydata
+            new_xlim = [self.pan_start_xlim[0] - dx, self.pan_start_xlim[1] - dx]
+            new_ylim = [self.pan_start_ylim[0] - dy, self.pan_start_ylim[1] - dy]
+            self.ax.set_xlim(new_xlim)
+            self.ax.set_ylim(new_ylim)
+            self.canvas.draw_idle()
+
+    # ---------- Очистка ----------
     def clear_graph(self):
         self.data.clear()
         self.line_names.clear()
@@ -684,7 +744,6 @@ class SerialPlotter:
         self.ax.set_title("Данные с COM-порта", fontsize=9)
         self.canvas.draw()
 
-    # ---------- Отправка произвольных данных ----------
     def send_data(self):
         if not self.is_connected or not self.ser or not self.ser.is_open:
             messagebox.showerror("Ошибка", "Порт не подключён!")
@@ -702,9 +761,22 @@ class SerialPlotter:
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка отправки: {str(e)}")
 
-    # ---------- Дополнительные методы ----------
     def toggle_raw_data(self):
         self.show_raw_data = self.raw_data_var.get()
+
+    def toggle_auto_mode(self):
+        auto = self.auto_mode.get()
+        widgets = [
+            self.samples_entry, self.samples_btn,
+            self.max_vert_entry,
+            self.sample_rate_entry, self.sample_rate_btn,
+            self.post_pause_entry, self.post_pause_btn
+        ]
+        state = "disabled" if auto else "normal"
+        for w in widgets:
+            w.config(state=state)
+        if self.data and self.is_accepting:
+            self._perform_update()
 
 
 if __name__ == "__main__":
