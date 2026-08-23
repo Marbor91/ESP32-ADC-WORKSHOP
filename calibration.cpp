@@ -10,7 +10,7 @@ const int ADC_RES = 4096;       // 12-битный ADC
 const int DAC_RES = 256;        // 8-битный DAC
 const int INTERP_STEPS = 16;    // Шагов интерполяции
 const int FINE_STEPS = 5;       // Точная интерполяция
-const int AVG_COEF = 2;
+const int AVG_COEF = 8;         // Усреднение на сырых данных 
 
 #define UART_SPEED    921600
 #define ADC_PIN       35            // ADC1_7 channel
@@ -31,14 +31,14 @@ void PrintData (A a, B b)
   delay(1);
 }
 
-// Подача через DAC, сырые измерения с сглаживанием (256 точек)
+//сырые измерения с сглаживанием (256 точек)
 void Measure(int cycles) 
 {
   for (int c = 0; c < cycles; c++)
   {
     for (int i = 0; i < DAC_RES; i++) {
-      dac_output_voltage(DAC_PIN, i);
-      delayMicroseconds(100); // Увеличенное время стабилизации
+      dac_output_voltage(DAC_PIN, i); // Подача через DAC, 
+      delayMicroseconds(200);         // Увеличенное время стабилизации
       
       // Усреднение измерений
       float sum = 0;
@@ -53,6 +53,21 @@ void Measure(int cycles)
       else RawData[i] = 0.9f * RawData[i] + 0.1f * avg;
     }
   }
+}
+void FilterRawData() {
+    // Простой медианный фильтр по 3 точкам
+    float filtered[DAC_RES];
+    for (int i = 1; i < DAC_RES-1; i++) {
+        float a = RawData[i-1], b = RawData[i], c = RawData[i+1];
+        // Сортировка трёх чисел
+        if (a > b) std::swap(a,b);
+        if (b > c) std::swap(b,c);
+        if (a > b) std::swap(a,b);
+        filtered[i] = b; // медиана
+    }
+    filtered[0] = RawData[0];
+    filtered[DAC_RES-1] = RawData[DAC_RES-1];
+    memcpy(RawData, filtered, sizeof(RawData));
 }
 
 // Основная интерполяция (256 -> 4096 точек)
@@ -157,6 +172,8 @@ void loop() {
 
   // Этап 1: Измерения
   Measure(100);
+  FilterRawData();  // убрать выбросы медианным фильтром
+  
   Serial.println("Calibration finished");
   AwaitEnter();
   for(int i = 0; i < DAC_RES; i++) {PrintData(i*16,RawData[i]);}
@@ -186,8 +203,8 @@ void loop() {
     delay(10);
     int raw = analogRead(ADC_PIN);
     PrintData (i*16, (uint16_t)InterpData[raw]);
-    Serial.print("|PLOT_END|\r\n"); // передача фрейма завершена, плоттер потом будет его рисовать
   }
+  Serial.print("|PLOT_END|\r\n"); // передача фрейма завершена, плоттер потом будет его рисовать
 #else
   // Вывод LUT таблицы
   Serial.print(" LUT table output mode");
