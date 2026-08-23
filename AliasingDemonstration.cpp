@@ -4,9 +4,7 @@
 // ------------------- НАСТРОЙКИ -------------------
 #define BAUD_RATE 921600
 #define ADC_PIN   ADC1_CHANNEL_7 // 35 pin
-#define MAX_SAMPLES 10000
-
-//#define CAL_ON    // используем ли ЛУТ таблицу откалиброванных значений?
+#define MAX_SAMPLES 5000
 
 // Переменные (изменяемые)
 uint32_t sampleRate = 1000;
@@ -21,8 +19,10 @@ struct buffer_data
     uint16_t* currentBuffer = buffer1;
     uint16_t* sendBuffer = nullptr;
 };
-buffer_data bufRaw;
-buffer_data bufCal;
+buffer_data bufRaw;   // сырые значения
+buffer_data bufCal;   // откалиброванные значения
+buffer_data bufFilt;  // отфильтрованные значения
+
 
 const uint16_t ADC_LUT[4096] PROGMEM = {
 0,50,51,53,54,56,57,59,60,62,63,65,66,67,68,70,
@@ -76,7 +76,7 @@ const uint16_t ADC_LUT[4096] PROGMEM = {
 868,869,870,871,872,873,874,875,875,876,877,878,879,880,881,883,
 884,885,887,888,889,891,892,893,895,896,897,898,898,899,900,901,
 902,903,904,904,905,906,907,908,909,910,910,911,912,914,915,916,
-917,919,920,4080,923,924,925,926,928,929,930,931,932,933,934,935,
+917,919,920,922,923,924,925,926,928,929,930,931,932,933,934,935,
 936,937,938,939,940,941,943,944,945,946,947,948,950,951,952,953,
 955,956,957,958,959,960,961,962,963,964,965,966,967,968,969,970,
 971,972,972,973,974,975,976,977,979,980,981,982,983,984,986,987,
@@ -127,7 +127,7 @@ const uint16_t ADC_LUT[4096] PROGMEM = {
 1704,1706,1707,1708,1709,1710,1711,1712,1713,1714,1715,1717,1718,1719,1720,1721,
 1722,1723,1725,1726,1727,1728,1729,1730,1731,1732,1733,1734,1735,1736,1737,1739,
 1740,1741,1742,1743,1744,1745,1746,1747,1748,1749,1750,1751,1752,1753,1754,1755,
-1756,1757,1758,1759,1760,1761,4080,1763,1764,1766,1767,1768,1769,1770,1771,1772,
+1756,1757,1758,1759,1760,1761,1762,1763,1764,1766,1767,1768,1769,1770,1771,1772,
 1774,1775,1776,1777,1778,1779,1779,1780,1781,1782,1783,1784,1785,1786,1787,1788,
 1789,1790,1790,1791,1792,1794,1795,1796,1797,1798,1799,1800,1801,1803,1804,1805,
 1806,1807,1808,1809,1810,1811,1812,1813,1814,1815,1816,1818,1819,1820,1821,1822,
@@ -178,7 +178,7 @@ const uint16_t ADC_LUT[4096] PROGMEM = {
 2527,2528,2529,2530,2531,2532,2533,2534,2535,2536,2537,2538,2539,2540,2541,2543,
 2544,2544,2545,2546,2547,2548,2549,2550,2551,2552,2553,2554,2555,2555,2556,2557,
 2558,2559,2560,2561,2562,2563,2564,2565,2566,2568,2569,2570,2571,2572,2573,2574,
-2575,2576,2577,2578,2579,2580,2581,2583,2584,4079,2586,2587,2588,2589,2590,2591,
+2575,2576,2577,2578,2579,2580,2581,2583,2584,2585,2586,2587,2588,2589,2590,2591,
 2592,2593,2594,2595,2596,2597,2598,2599,2600,2601,2602,2603,2604,2605,2606,2607,
 2608,2609,2610,2611,2612,2614,2615,2616,2617,2618,2619,2620,2621,2622,2623,2624,
 2626,2627,2628,2629,2630,2631,2632,2633,2634,2635,2637,2638,2639,2640,2641,2642,
@@ -229,7 +229,7 @@ const uint16_t ADC_LUT[4096] PROGMEM = {
 3341,3342,3343,3344,3345,3346,3347,3348,3349,3350,3350,3351,3352,3353,3354,3355,
 3356,3357,3357,3358,3359,3360,3361,3362,3363,3364,3365,3366,3367,3368,3369,3370,
 3370,3371,3372,3373,3374,3375,3376,3377,3378,3379,3380,3381,3382,3382,3383,3384,
-3385,3386,3387,3388,3389,3390,3391,3391,3392,3393,3394,3395,4079,3397,3398,3399,
+3385,3386,3387,3388,3389,3390,3391,3391,3392,3393,3394,3395,3396,3397,3398,3399,
 3400,3401,3402,3403,3404,3405,3406,3406,3407,3408,3409,3410,3411,3412,3413,3414,
 3414,3415,3416,3417,3418,3419,3420,3421,3421,3422,3423,3424,3425,3426,3427,3428,
 3429,3430,3431,3432,3433,3434,3435,3436,3437,3438,3439,3440,3441,3442,3442,3443,
@@ -283,17 +283,40 @@ const uint16_t ADC_LUT[4096] PROGMEM = {
 3976,3977,3978,3978,3979,3979,3980,3981,3981,3982,3982,3983,3983,3985,3993,4000
 };
 
+
 volatile uint32_t sampleCount = 0;
 volatile bool bufferReady = false;
+volatile bool isCalibrationOn = false;
 
 hw_timer_t* timer = nullptr;
 
+// ------------------- ПЕРЕМЕННЫЕ ФИЛЬТРОВ -------------------
+uint8_t filterType = 0; // 0 - нет, 1 - EMA, 2 - медианный 3, 3 - скользящее среднее (окно 5)
+
+// Состояния фильтров
+static float ema_prev = 0.0f;
+static uint16_t med_buf[3] = {0};
+static uint8_t med_idx = 0;
+static uint16_t mov_buf[5] = {0};
+static uint8_t mov_idx = 0;
+static uint32_t mov_sum = 0;
+
+// Сброс состояний фильтров
+void resetFilters() {
+    ema_prev = 0.0f;
+    med_idx = 0;
+    med_buf[0] = med_buf[1] = med_buf[2] = 0;
+    mov_idx = 0;
+    mov_sum = 0;
+    for (int i = 0; i < 5; i++) mov_buf[i] = 0;
+}
+
 // ------------------- СОСТОЯНИЯ АВТОМАТА -------------------
 enum States {
-    IDLE,           // ожидание заполнения буфера
-    SENDING_DATA,   // отправка данных (занимает несколько циклов)
-    PAUSE,          // пауза после отправки
-    SENDING_RST     // отправка PLOT_RST
+    IDLE,
+    SENDING_DATA,
+    PAUSE,
+    SENDING_RST
 };
 States state = IDLE;
 uint32_t pauseStart = 0;
@@ -302,10 +325,10 @@ uint32_t pauseStart = 0;
 String inputString = "";
 bool commandReady = false;
 
-template <typename A, typename B>
-void PrintData (A a, B b)
+template <typename A, typename B, typename C>
+void PrintData (A a, B b, C c)
 {
-  Serial.printf("|Before=%d,After=%d|\r\n", (int)a, (int)b);
+  Serial.printf("|Raw=%d,Cal=%d,Filt=%d|\r\n", (int)a, (int)b, (int)c);
   delay(1);
 }
 
@@ -315,7 +338,6 @@ void processCommand(String cmd) {
         int val = cmd.substring(strlen("sampleRate = ")).toInt();
         if (val > 0) {
             sampleRate = val;
-            // Переустановка таймера
             timerAlarmDisable(timer);
             uint32_t period_us = 1000000 / sampleRate;
             timerAlarmWrite(timer, period_us, true);
@@ -329,15 +351,19 @@ void processCommand(String cmd) {
         int val = cmd.substring(strlen("samplesPerBatch = ")).toInt();
         if (val > 0 && val <= MAX_SAMPLES) {
             samplesPerBatch = val;
-            // Сбрасываем текущий сбор, чтобы не было путаницы
+
             noInterrupts();
             sampleCount = 0;
             bufferReady = false;
 
-            bufRaw.currentBuffer = bufRaw.buffer1;   // начинаем с первого
+            bufRaw.currentBuffer = bufRaw.buffer1;
             bufRaw.sendBuffer = nullptr;
-            bufCal.currentBuffer = bufCal.buffer1;   // начинаем с первого
+            bufCal.currentBuffer = bufCal.buffer1;
             bufCal.sendBuffer = nullptr;
+            bufFilt.currentBuffer = bufFilt.buffer1;
+            bufFilt.sendBuffer = nullptr;
+
+            resetFilters(); // Сброс фильтров при изменении размера пакета
             interrupts();
             Serial.println("OK");
         } else {
@@ -353,6 +379,25 @@ void processCommand(String cmd) {
             Serial.println("ERROR: postPause must be >= 0");
         }
     }
+    else if (cmd.startsWith("Calibration = ")) {
+        int val = cmd.substring(strlen("Calibration = ")).toInt();
+        if (val == 1 || val == 0) {
+            isCalibrationOn = (val == 1);
+            Serial.println("OK");
+        } else {
+            Serial.println("ERROR: Calibration must be 1 or 0");
+        }
+    }
+    else if (cmd.startsWith("Filter = ")) {
+        int val = cmd.substring(strlen("Filter = ")).toInt();
+        if (val >= 0 && val <= 3) {
+            filterType = val;
+            resetFilters(); // Сброс при смене фильтра
+            Serial.println("OK");
+        } else {
+            Serial.println("ERROR: Filter must be 0..3");
+        }
+    }
     else {
         Serial.println("ERROR: unknown command");
     }
@@ -360,25 +405,72 @@ void processCommand(String cmd) {
 
 // ------------------- ПРЕРЫВАНИЕ ТАЙМЕРА -------------------
 void IRAM_ATTR onTimer() {
-    uint16_t val = adc1_get_raw(ADC_PIN);
-    if (sampleCount < samplesPerBatch) 
-    {
-        bufRaw.currentBuffer[sampleCount] = val;
-            
-        #ifdef CAL_ON
-            bufCal.currentBuffer[sampleCount] = ADC_LUT[val]; // вот тут по таблице вставляем откалиброванное значение 
-        #else
-            bufCal.currentBuffer[sampleCount] = val;
-        #endif
+    uint16_t raw = adc1_get_raw(ADC_PIN);
+    uint16_t calVal;
+    if (isCalibrationOn) {
+        calVal = pgm_read_word(&ADC_LUT[raw]); // чтение из PROGMEM
+    } else {
+        calVal = raw;
+    }
 
+    // Фильтрация
+    uint16_t filtVal;
+    switch (filterType) {
+        case 0: // нет фильтра
+            filtVal = calVal;
+            break;
+        case 1: { // EMA (alpha = 0.1)
+            static float alpha = 0.1f;
+            if (sampleCount == 0) {
+                ema_prev = calVal;
+            } else {
+                ema_prev = ema_prev + alpha * (calVal - ema_prev);
+            }
+            filtVal = (uint16_t)(ema_prev + 0.5f);
+            break;
+        }
+        case 2: { // Медианный фильтр 3
+            med_buf[med_idx++] = calVal;
+            if (med_idx >= 3) med_idx = 0;
+            // Сортировка 3 значений
+            uint16_t a = med_buf[0], b = med_buf[1], c = med_buf[2];
+            if (a > b) { uint16_t t = a; a = b; b = t; }
+            if (b > c) { uint16_t t = b; b = c; c = t; }
+            if (a > b) { uint16_t t = a; a = b; b = t; }
+            filtVal = b; // медиана
+            break;
+        }
+        case 3: { // Скользящее среднее (окно 5)
+            mov_sum -= mov_buf[mov_idx];
+            mov_buf[mov_idx] = calVal;
+            mov_sum += calVal;
+            mov_idx = (mov_idx + 1) % 5;
+            if (sampleCount < 4) {
+                filtVal = calVal; // пока не накопили 5 значений
+            } else {
+                filtVal = mov_sum / 5;
+            }
+            break;
+        }
+        default:
+            filtVal = calVal;
+            break;
+    }
+
+    if (sampleCount < samplesPerBatch) {
+        bufRaw.currentBuffer[sampleCount] = raw;
+        bufCal.currentBuffer[sampleCount] = calVal;
+        bufFilt.currentBuffer[sampleCount] = filtVal;
         sampleCount++;
-        if (sampleCount == samplesPerBatch) 
-        {
-            bufRaw.sendBuffer =     bufRaw.currentBuffer;
+        if (sampleCount == samplesPerBatch) {
+            bufRaw.sendBuffer = bufRaw.currentBuffer;
             bufRaw.currentBuffer = (bufRaw.currentBuffer == bufRaw.buffer1) ? bufRaw.buffer2 : bufRaw.buffer1;
 
-            bufCal.sendBuffer =     bufCal.currentBuffer;
+            bufCal.sendBuffer = bufCal.currentBuffer;
             bufCal.currentBuffer = (bufCal.currentBuffer == bufCal.buffer1) ? bufCal.buffer2 : bufCal.buffer1;
+
+            bufFilt.sendBuffer = bufFilt.currentBuffer;
+            bufFilt.currentBuffer = (bufFilt.currentBuffer == bufFilt.buffer1) ? bufFilt.buffer2 : bufFilt.buffer1;
 
             sampleCount = 0;
             bufferReady = true;
@@ -400,6 +492,7 @@ void setup() {
     timerAlarmEnable(timer);
 
     state = IDLE;
+    resetFilters();
 }
 
 // ------------------- LOOP -------------------
@@ -427,29 +520,23 @@ void loop() {
         case IDLE:
             if (bufferReady) {
                 bufferReady = false;
-                // Переходим к отправке данных
                 state = SENDING_DATA;
-                // sendBuffer уже установлен в прерывании
             }
             break;
 
         case SENDING_DATA:
-            // Отправляем все отсчёты
             for (uint32_t i = 0; i < samplesPerBatch; i++) {
-              PrintData(bufRaw.sendBuffer[i], bufCal.sendBuffer[i]); 
-              }
-            Serial.print("|PLOT_END|\r\n"); // передача фрейма завершена, плоттер потом будет его рисовать
-
-            // Переходим в паузу
+                PrintData(bufRaw.sendBuffer[i], bufCal.sendBuffer[i], bufFilt.sendBuffer[i]);
+            }
+            Serial.print("|PLOT_END|\r\n");
             pauseStart = millis();
             state = PAUSE;
             break;
 
         case PAUSE:
             if (millis() - pauseStart >= postPause) {
-                // После паузы плоттер стирает график
                 Serial.print("|PLOT_RST|\r\n");
-                state = IDLE;  
+                state = IDLE;
             }
             break;
 
@@ -458,6 +545,5 @@ void loop() {
             break;
     }
 
-    // Небольшая задержка для стабильности (не блокирует приём)
     delay(1);
 }
