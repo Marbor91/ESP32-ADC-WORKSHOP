@@ -19,7 +19,6 @@ const int AVG_COEF = 8;         // Усреднение на сырых данн
 #define NEXT_STEP_NUM 1
 
 
-
 float RawData[DAC_RES] = {0};             // Сырые данные (256 точек)
 float InterpData[ADC_RES] = {0};          // Интерполированные данные (4096 точек)
 float FineData[ADC_RES*FINE_STEPS] = {0}; // Высокоточные данные
@@ -47,7 +46,7 @@ void Measure(int cycles)
         delayMicroseconds(10);
       }
       float avg = sum / (float)AVG_COEF;
-      
+
       // Экспоненциальное сглаживание
       if (c == 0) RawData[i] = avg;
       else RawData[i] = 0.9f * RawData[i] + 0.1f * avg;
@@ -125,8 +124,8 @@ void setup() {
   dac_output_enable(DAC_PIN);
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
-  delay(1000);  
-/*
+  delay(1000);
+  /*
   // Читаем внутреннюю калибровку ESP32
   Serial.print("esp_adc_cal_check_efuse... ESP_ADC_CAL_VAL_EFUSE_VREF: ");
   Serial.println(esp_adc_cal_check_efuse( ESP_ADC_CAL_VAL_EFUSE_VREF));
@@ -181,13 +180,13 @@ void loop() {
   
   // Этап 2: Интерполяция
   Serial.println("Main interpolation (256 -> 4096 dotes)");
-  AwaitEnter();
+  //AwaitEnter();
 
   Interpolate();
   //for(int i = 0; i < ADC_RES; i++) {PrintData(i,(uint16_t)InterpData[i]);}
   
   Serial.println("Precision interpolation (4096 -> 4096*5 dotes)");
-  AwaitEnter();
+  //AwaitEnter();
   FineInterpolate();
   //for(int i = 0; i < (ADC_RES)*FINE_STEPS; i++) {PrintData(i,FineData[i]);}
   

@@ -1,11 +1,11 @@
 #include <Arduino.h>
 #include "driver/adc.h"
 
-// ------------------- НАСТРОЙКИ -------------------
 #define BAUD_RATE 921600
 #define ADC_PIN   ADC1_CHANNEL_7 // 35 pin
 #define MAX_SAMPLES 5000
 #define MAX_WINDOW 50            // максимальный размер окна для скользящего среднего
+#define ESP_VOLTAGE 3300
 
 // Переменные (изменяемые)
 uint32_t sampleRate = 1000;
@@ -549,26 +549,26 @@ volatile bool useBadLUT = false;   // флаг для выбора "плохой
 
 hw_timer_t* timer = nullptr;
 
-// ------------------- ПЕРЕМЕННЫЕ ФИЛЬТРОВ -------------------
+// настройки фильтров
+// Exponential Moving Average
+// Median
+// Moving Average
 uint8_t filterType = 0;           // 0 - нет, 1 - EMA, 2 - медианный 3, 3 - скользящее среднее
-
-// Параметры фильтров (изменяемые через UART)
 uint8_t ema_alpha10 = 1;          // альфа для EMA, умноженная на 10 (0.1 -> 1, 1.0 -> 10)
 uint8_t windowSize = 5;           // размер окна для скользящего среднего (по умолчанию 5)
-
-// Режим вывода: 0 - коды АЦП (0..4095), 1 - милливольты (0..3300)
 uint8_t outputMode = 0;           // 0 - "N", 1 - "V"
 
 // Состояния фильтров (целочисленные, без float)
 static uint16_t ema_prev = 0;
+
 static uint16_t med_buf[3] = {0};
 static uint8_t med_idx = 0;
+
 static uint16_t mov_buf[MAX_WINDOW] = {0};
 static uint8_t mov_idx = 0;
 static uint32_t mov_sum = 0;
 static uint8_t mov_count = 0;      // сколько значений уже накоплено (до windowSize)
 
-// Сброс состояний фильтров
 void resetFilters() {
     ema_prev = 0;
     med_idx = 0;
@@ -602,9 +602,9 @@ void PrintData (A a, B b, C c)
     Serial.printf("|Raw=%d,Cal=%d,Filt=%d|\r\n", (int)a, (int)b, (int)c);
   } else {
     // Вывод в милливольтах (0..3300)
-    uint32_t mV_a = (uint32_t)a * 3300 / 4095;
-    uint32_t mV_b = (uint32_t)b * 3300 / 4095;
-    uint32_t mV_c = (uint32_t)c * 3300 / 4095;
+    uint32_t mV_a = (uint32_t)a * ESP_VOLTAGE / 4095;
+    uint32_t mV_b = (uint32_t)b * ESP_VOLTAGE / 4095;
+    uint32_t mV_c = (uint32_t)c * ESP_VOLTAGE / 4095;
     Serial.printf("|Raw=%d,Cal=%d,Filt=%d|\r\n", mV_a, mV_b, mV_c);
   }
   delay(1);
@@ -763,7 +763,8 @@ void IRAM_ATTR onTimer() {
         case 0: // нет фильтра
             filtVal = calVal;
             break;
-        case 1: { // EMA целочисленная
+        case 1: {   // EMA целочисленная
+                    // в классическом виде filter = value * k + filter * (1 - k), k = 0...1 
             uint32_t newVal = (uint32_t)ema_alpha10 * calVal + (10 - ema_alpha10) * ema_prev;
             ema_prev = (uint16_t)((newVal + 5) / 10);
             filtVal = ema_prev;
