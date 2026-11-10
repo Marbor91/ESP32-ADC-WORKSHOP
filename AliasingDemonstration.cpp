@@ -7,7 +7,6 @@
 #define MAX_WINDOW 50            // максимальный размер окна для скользящего среднего
 #define ESP_VOLTAGE 3300
 
-// Переменные (изменяемые)
 uint32_t sampleRate = 1000;
 uint32_t samplesPerBatch = 1000;
 uint32_t postPause = 1000;
@@ -579,7 +578,7 @@ void resetFilters() {
     for (int i = 0; i < MAX_WINDOW; i++) mov_buf[i] = 0;
 }
 
-// ------------------- СОСТОЯНИЯ АВТОМАТА -------------------
+// ------------------- СОСТОЯНИЯ АВТОМАТА отправки данных в плоттер -------------------
 enum States {
     IDLE,
     SENDING_DATA,
@@ -757,7 +756,7 @@ void IRAM_ATTR onTimer() {
         calVal = raw;
     }
 
-    // Фильтрация
+    // Фильтрация данных
     uint16_t filtVal;
     switch (filterType) {
         case 0: // нет фильтра
@@ -797,7 +796,7 @@ void IRAM_ATTR onTimer() {
             filtVal = calVal;
             break;
     }
-
+    // Распихиваем по буферам по готовности
     if (sampleCount < samplesPerBatch) {
         bufRaw.currentBuffer[sampleCount] = raw;
         bufCal.currentBuffer[sampleCount] = calVal;
@@ -839,7 +838,7 @@ void setup() {
 
 // ------------------- LOOP -------------------
 void loop() {
-    // ---- 1. Приём команд ----
+    // ---- 1. Приём команд от плоттера ----
     while (Serial.available()) {
         char c = Serial.read();
         if (c == '\r' || c == '\n') {
@@ -857,7 +856,7 @@ void loop() {
         commandReady = false;
     }
 
-    // ---- 2. Автомат состояний ----
+    // ---- 2. Периодическая отправка данных в плоттер по готовности ----
     switch (state) {
         case IDLE:
             if (bufferReady) {
