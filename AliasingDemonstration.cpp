@@ -638,10 +638,7 @@ void processCommand(String cmd) {
         int val = cmd.substring(strlen("sampleRate = ")).toInt();
         if (val > 0) {
             sampleRate = val;
-            timerAlarmDisable(timer);
-            uint32_t period_us = 1000000 / sampleRate;
-            timerAlarmWrite(timer, period_us, true);
-            timerAlarmEnable(timer);
+            timerAlarm(timer, 1000000 / sampleRate, true, 0);
             Serial.println("OK");
         } else {
             Serial.println("ERROR: sampleRate must be > 0");
@@ -825,11 +822,10 @@ void setup() {
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(ADC_PIN, ADC_ATTEN_DB_12);
 
-    timer = timerBegin(0, 80, true);
-    uint32_t period_us = 1000000 / sampleRate;
-    timerAlarmWrite(timer, period_us, true);
-    timerAttachInterrupt(timer, &onTimer, true);
-    timerAlarmEnable(timer);
+    // Новый API: timerBegin(частота в Гц). 1 000 000 Гц = 1 тик/мкс.
+    timer = timerBegin(1000000);
+    timerAttachInterrupt(timer, &onTimer);
+    timerAlarm(timer, 1000000 / sampleRate, true, 0);
 
     state = IDLE;
     resetFilters();
